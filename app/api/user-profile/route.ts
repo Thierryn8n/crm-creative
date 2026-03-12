@@ -9,12 +9,33 @@ export async function GET(request: NextRequest) {
     const { data: { user } } = await supabase.auth.getUser()
     let profileId: string | null = null
     if (user) {
-      profileId = user.id
+      // Buscar o ID real do perfil na tabela profiles
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('user_id', user.id)
+        .maybeSingle()
+      
+      if (profileData) {
+        profileId = profileData.id
+      } else {
+        // Criar perfil se não existir para o usuário logado
+        const { data: inserted } = await supabase
+          .from('profiles')
+          .insert([{ 
+            user_id: user.id,
+            user_name: user.user_metadata?.name || user.user_metadata?.full_name || user.email?.split('@')[0] || 'Usuário',
+            email: user.email
+          }])
+          .select('id')
+          .single()
+        profileId = inserted?.id || null
+      }
     } else {
       profileId = request.cookies.get(PROFILE_COOKIE)?.value || null
       if (!profileId) {
         const { data: inserted } = await supabase
-          .from('user_profiles')
+          .from('profiles')
           .insert([{ user_name: 'Usuário', email: null }])
           .select('id')
           .single()
@@ -22,13 +43,11 @@ export async function GET(request: NextRequest) {
           return NextResponse.json({ error: 'Falha ao criar perfil' }, { status: 500 })
         }
         profileId = inserted.id
-        const setCookie = NextResponse.next()
-        setCookie.cookies.set(PROFILE_COOKIE, profileId || '', { httpOnly: true, sameSite: 'lax', path: '/' })
       }
     }
 
     const { data: profile } = await supabase
-      .from('user_profiles')
+      .from('profiles')
       .select('*')
       .eq('id', profileId)
       .maybeSingle()
@@ -36,12 +55,19 @@ export async function GET(request: NextRequest) {
     const { data: portfolio } = await supabase
       .from('portfolio_items')
       .select('*')
-      .eq('user_id', profileId)
+      .eq('profile_id', profileId)
       .eq('category', 'resume')
       .order('created_at', { ascending: false })
       .limit(5)
 
-    return NextResponse.json({ profile, portfolio: portfolio || [] })
+    const response = NextResponse.json({ profile, portfolio: portfolio || [] })
+    
+    // Garantir que o cookie esteja definido para usuários não logados
+    if (!user && profileId) {
+      response.cookies.set(PROFILE_COOKIE, profileId, { httpOnly: true, sameSite: 'lax', path: '/' })
+    }
+    
+    return response
   } catch (e) {
     return NextResponse.json({ error: 'Erro interno' }, { status: 500 })
   }
@@ -53,12 +79,33 @@ export async function POST(request: NextRequest) {
     const { data: { user } } = await supabase.auth.getUser()
     let profileId: string | null = null
     if (user) {
-      profileId = user.id
+      // Buscar o ID real do perfil na tabela profiles
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('user_id', user.id)
+        .maybeSingle()
+      
+      if (profileData) {
+        profileId = profileData.id
+      } else {
+        // Criar perfil se não existir para o usuário logado
+        const { data: inserted } = await supabase
+          .from('profiles')
+          .insert([{ 
+            user_id: user.id,
+            user_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Usuário',
+            email: user.email
+          }])
+          .select('id')
+          .single()
+        profileId = inserted?.id || null
+      }
     } else {
       profileId = request.cookies.get(PROFILE_COOKIE)?.value || null
       if (!profileId) {
         const { data: inserted } = await supabase
-          .from('user_profiles')
+          .from('profiles')
           .insert([{ user_name: 'Usuário', email: null }])
           .select('id')
           .single()
@@ -77,10 +124,10 @@ export async function POST(request: NextRequest) {
       const file = form.get('pdf') as File | null
 
       await supabase
-        .from('user_profiles')
+        .from('profiles')
         .upsert({
           id: profileId,
-          user_name: user?.user_metadata?.full_name || user?.email || 'Usuário',
+          user_name: user?.user_metadata?.name || user?.user_metadata?.full_name || user?.email || 'Usuário',
           email: user?.email || null,
           linkedin_url,
           resume_text,
@@ -126,7 +173,7 @@ export async function POST(request: NextRequest) {
           const { error: portfolioError } = await supabase
             .from('portfolio_items')
             .insert([{
-              user_id: profileId,
+              profile_id: profileId,
               title: file.name || 'Currículo PDF',
               description: 'Currículo do usuário',
               type: 'pdf',
@@ -134,7 +181,7 @@ export async function POST(request: NextRequest) {
               thumbnail_url: null,
               media_urls: [pdfUrl],
               external_id: null,
-              source_table: 'user_profiles'
+              source_table: 'profiles'
             }])
           
           if (portfolioError) {
@@ -147,12 +194,12 @@ export async function POST(request: NextRequest) {
           const { error: resumeError } = await supabase
             .from('user_resumes')
             .upsert({
-              user_id: profileId,
+              profile_id: profileId,
               type: 'resume',
               content: `Conteúdo do arquivo PDF: ${file.name}. (Aguardando processamento profundo)`,
               file_url: pdfUrl,
               updated_at: new Date().toISOString()
-            }, { onConflict: 'user_id,type' })
+            }, { onConflict: 'profile_id,type' })
 
           if (resumeError) {
             console.error('[Upload] Erro ao inserir em user_resumes:', resumeError.message)
@@ -163,7 +210,7 @@ export async function POST(request: NextRequest) {
       }
 
       const { data: profile } = await supabase
-        .from('user_profiles')
+        .from('profiles')
         .select('*')
         .eq('id', profileId)
         .maybeSingle()
@@ -171,7 +218,7 @@ export async function POST(request: NextRequest) {
       const { data: portfolio } = await supabase
         .from('portfolio_items')
         .select('*')
-        .eq('user_id', profileId)
+        .eq('profile_id', profileId)
         .eq('category', 'resume')
         .order('created_at', { ascending: false })
         .limit(5)
@@ -189,16 +236,24 @@ export async function POST(request: NextRequest) {
       return res
     } else {
       const body = await request.json()
-      const { linkedin_url, resume_text } = body
+      const { user_name, email, phone, linkedin_url, indeed_url, portfolio_url, github_url, behance_url, bio, availability, hourly_rate, daily_rate } = body
 
-      await supabase
-        .from('user_profiles')
+      const { error } = await supabase
+        .from('profiles')
         .upsert({
           id: profileId,
-          user_name: user?.user_metadata?.full_name || user?.email || 'Usuário',
-          email: user?.email || null,
-          linkedin_url: linkedin_url ?? null,
-          resume_text: resume_text ?? null,
+          user_name,
+          email,
+          phone,
+          linkedin_url,
+          indeed_url,
+          portfolio_url,
+          github_url,
+          behance_url,
+          bio,
+          availability,
+          hourly_rate,
+          daily_rate,
           updated_at: new Date().toISOString()
         }, { onConflict: 'id' })
 

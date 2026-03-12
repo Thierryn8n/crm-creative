@@ -2,9 +2,10 @@
 -- Data: 2026-03-07
 -- Descrição: Cria tabelas para análise detalhada de empresas e perfil do usuário
 
--- 1. Criar tabela user_profiles para armazenar perfil do usuário
-CREATE TABLE IF NOT EXISTS user_profiles (
+-- 1. Criar tabela profiles para armazenar perfil do usuário
+CREATE TABLE IF NOT EXISTS profiles (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id UUID UNIQUE REFERENCES auth.users(id) ON DELETE CASCADE,
     user_name VARCHAR(255) NOT NULL,
     email VARCHAR(255) UNIQUE,
     phone VARCHAR(50),
@@ -100,7 +101,7 @@ CREATE TABLE IF NOT EXISTS company_analysis (
 -- 4. Criar tabela user_skills_matches para match entre perfil e oportunidades
 CREATE TABLE IF NOT EXISTS user_skills_matches (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    user_profile_id UUID REFERENCES user_profiles(id),
+    profile_id UUID REFERENCES profiles(id),
     company_analysis_id UUID REFERENCES company_analysis(id),
     match_score INTEGER DEFAULT 0, -- pontuação de 0-100
     matching_skills TEXT[] DEFAULT '{}', -- habilidades que combinam
@@ -130,14 +131,14 @@ CREATE TABLE IF NOT EXISTS strategy_templates (
 );
 
 -- 6. Criar índices para performance
-CREATE INDEX IF NOT EXISTS idx_user_profiles_email ON user_profiles(email);
+CREATE INDEX IF NOT EXISTS idx_profiles_email ON profiles(email);
 CREATE INDEX IF NOT EXISTS idx_portfolio_items_category ON portfolio_items(category);
 CREATE INDEX IF NOT EXISTS idx_portfolio_items_is_featured ON portfolio_items(is_featured);
 CREATE INDEX IF NOT EXISTS idx_company_analysis_company_name ON company_analysis(company_name);
 CREATE INDEX IF NOT EXISTS idx_company_analysis_industry ON company_analysis(industry);
 CREATE INDEX IF NOT EXISTS idx_company_analysis_analysis_status ON company_analysis(analysis_status);
 CREATE INDEX IF NOT EXISTS idx_company_analysis_related_contact ON company_analysis(related_contact_id);
-CREATE INDEX IF NOT EXISTS idx_user_skills_matches_user ON user_skills_matches(user_profile_id);
+CREATE INDEX IF NOT EXISTS idx_user_skills_matches_user ON user_skills_matches(profile_id);
 CREATE INDEX IF NOT EXISTS idx_user_skills_matches_company ON user_skills_matches(company_analysis_id);
 CREATE INDEX IF NOT EXISTS idx_user_skills_matches_score ON user_skills_matches(match_score DESC);
 
@@ -151,9 +152,9 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- 8. Criar triggers para updated_at
-DROP TRIGGER IF EXISTS update_user_profiles_updated_at ON user_profiles;
-CREATE TRIGGER update_user_profiles_updated_at
-    BEFORE UPDATE ON user_profiles
+DROP TRIGGER IF EXISTS update_profiles_updated_at ON profiles;
+CREATE TRIGGER update_profiles_updated_at
+    BEFORE UPDATE ON profiles
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
@@ -182,7 +183,7 @@ INSERT INTO strategy_templates (name, description, industry, company_size, templ
      '{"follow-up", "pós-reunião", "próximos passos"}');
 
 -- 10. Adicionar comentários para documentação
-COMMENT ON TABLE user_profiles IS 'Perfil completo do usuário com habilidades, experiência e preferências';
+COMMENT ON TABLE profiles IS 'Perfil completo do usuário com habilidades, experiência e preferências';
 COMMENT ON TABLE portfolio_items IS 'Itens do portfólio do usuário (imagens, vídeos, documentos)';
 COMMENT ON TABLE company_analysis IS 'Análise detalhada de empresas com estratégias geradas por IA';
 COMMENT ON TABLE user_skills_matches IS 'Matches entre perfil do usuário e oportunidades em empresas';

@@ -25,7 +25,7 @@ ADD COLUMN IF NOT EXISTS description TEXT;
 
 -- Criar índices para melhorar performance
 CREATE INDEX IF NOT EXISTS idx_portfolio_items_category ON portfolio_items(category);
-CREATE INDEX IF NOT EXISTS idx_user_skills_matches_user_id ON user_skills_matches(user_profile_id);
+CREATE INDEX IF NOT EXISTS idx_user_skills_matches_profile_id ON user_skills_matches(profile_id);
 CREATE INDEX IF NOT EXISTS idx_user_skills_matches_company_id ON user_skills_matches(company_analysis_id);
 CREATE INDEX IF NOT EXISTS idx_user_skills_matches_priority ON user_skills_matches(priority);
 

@@ -12,6 +12,17 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
     }
 
+    // Buscar perfil do usuário
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('user_id', user.id)
+      .single()
+
+    if (!profile) {
+      return NextResponse.json({ error: 'Perfil não encontrado' }, { status: 404 })
+    }
+
     // Buscar parâmetros da query
     const { searchParams } = new URL(request.url)
     const status = searchParams.get('status')
@@ -39,7 +50,7 @@ export async function GET(request: NextRequest) {
           created_at
         )
       `)
-      .eq('user_id', user.id)
+      .eq('profile_id', profile.id)
       .order('created_at', { ascending: false })
 
     // Aplicar filtros
@@ -92,6 +103,17 @@ export async function POST(request: NextRequest) {
     
     if (authError || !user) {
       return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
+    }
+
+    // Buscar perfil do usuário
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('user_id', user.id)
+      .single()
+
+    if (!profile) {
+      return NextResponse.json({ error: 'Perfil não encontrado' }, { status: 404 })
     }
 
     const body = await request.json()
@@ -362,7 +384,7 @@ export async function POST(request: NextRequest) {
     try {
       const companyAnalysisData = {
         related_client_id: finalCompanyId,
-        user_profile_id: user.id,
+        profile_id: profile.id,
         company_name: company_name || updatedClient.company_name,
         website_analysis: website_analysis || (final_ai_analysis?.website || {}),
         social_media_presence: social_media_analysis || (final_ai_analysis?.social || {}),
@@ -388,7 +410,7 @@ export async function POST(request: NextRequest) {
     // Criar ou atualizar registro em approved_companies para vincular ao usuário
     try {
       const approvedData = {
-        user_id: user.id,
+        profile_id: profile.id,
         company_id: finalCompanyId,
         company_name: company_name || updatedClient.company_name,
         website_url: website_url_top,
@@ -407,7 +429,7 @@ export async function POST(request: NextRequest) {
 
       const { error: approvedError } = await supabase
         .from('approved_companies')
-        .upsert(approvedData, { onConflict: 'user_id, company_id' });
+        .upsert(approvedData, { onConflict: 'profile_id, company_id' });
 
       if (approvedError) {
         console.error('Erro ao vincular empresa ao usuário (approved_companies):', approvedError);
@@ -421,7 +443,7 @@ export async function POST(request: NextRequest) {
     try {
       const insightData = {
         approved_company_id: finalCompanyId, // Usando ID do cliente como referência
-        user_id: user.id,
+        profile_id: profile.id,
         insight_type: 'analysis',
         title: 'Empresa Aprovada para Processo',
         content: `Empresa ${company_name} foi aprovada para processo de negociação com score de match ${match_score || 0}%. Análise completa disponível.`,
@@ -446,7 +468,7 @@ export async function POST(request: NextRequest) {
           feedback_notes: `Aprovada em ${new Date().toLocaleDateString('pt-BR')} com score ${match_score || 0}%`,
           last_discovered_at: new Date().toISOString()
         })
-        .eq('user_id', user.id)
+        .eq('profile_id', profile.id)
         .eq('company_name', company_name)
     } catch (e) {
        console.warn('Erro ao atualizar ai_search_memory (ignorado):', e);
@@ -474,6 +496,17 @@ export async function PUT(request: NextRequest) {
     
     if (authError || !user) {
       return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
+    }
+
+    // Buscar perfil do usuário
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('user_id', user.id)
+      .single()
+
+    if (!profile) {
+      return NextResponse.json({ error: 'Perfil não encontrado' }, { status: 404 })
     }
 
     const body = await request.json()
@@ -507,7 +540,7 @@ export async function PUT(request: NextRequest) {
       .from('approved_companies')
       .update(updateData)
       .eq('id', id)
-      .eq('user_id', user.id)
+      .eq('profile_id', profile.id)
       .select()
       .single()
 

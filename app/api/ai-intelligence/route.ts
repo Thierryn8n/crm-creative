@@ -13,6 +13,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
     }
 
+    // Buscar o profile_id do usuário
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle()
+
+    if (!profile) {
+      return NextResponse.json({ error: 'Perfil não encontrado' }, { status: 404 })
+    }
+
+    const profileId = profile.id
     const body = await request.json()
     const { 
       action,
@@ -25,16 +37,16 @@ export async function POST(request: NextRequest) {
 
     switch (action) {
       case 'analyze_company':
-        return await analyzeCompany(supabase, user.id, company_data, user_context)
+        return await analyzeCompany(supabase, profileId, company_data, user_context)
         
       case 'generate_strategy':
-        return await generateStrategy(supabase, user.id, analysis_id, company_data, previous_insights)
+        return await generateStrategy(supabase, profileId, analysis_id, company_data, previous_insights)
         
       case 'update_negotiation':
-        return await updateNegotiation(supabase, user.id, analysis_id, negotiation_history)
+        return await updateNegotiation(supabase, profileId, analysis_id, negotiation_history)
         
       case 'get_ai_insights':
-        return await getAIInsights(supabase, user.id, analysis_id)
+        return await getAIInsights(supabase, profileId, analysis_id)
         
       default:
         return NextResponse.json({ 
@@ -59,7 +71,7 @@ async function analyzeCompany(supabase: any, userId: string, companyData: any, u
     const { data: previousAnalysis } = await supabase
       .from('company_analysis')
       .select('*')
-      .eq('user_profile_id', userId)
+      .eq('profile_id', userId)
       .order('created_at', { ascending: false })
       .limit(10)
 
@@ -67,7 +79,7 @@ async function analyzeCompany(supabase: any, userId: string, companyData: any, u
     const { data: skillsMatches } = await supabase
       .from('user_skills_matches')
       .select('*')
-      .eq('user_profile_id', userId)
+      .eq('profile_id', userId)
       .limit(5)
 
     // Criar análise contextualizada com base em dados anteriores
@@ -98,7 +110,7 @@ async function analyzeCompany(supabase: any, userId: string, companyData: any, u
     const { data: newAnalysis, error } = await supabase
       .from('company_analysis')
       .insert([{
-        user_profile_id: userId,
+        profile_id: userId,
         company_name: companyData.name,
         website_analysis: companyData.website,
         social_media_analysis: companyData.socialMedia,
@@ -139,7 +151,7 @@ async function generateStrategy(supabase: any, userId: string, analysisId: strin
       .from('company_analysis')
       .select('*')
       .eq('id', analysisId)
-      .eq('user_profile_id', userId)
+      .eq('profile_id', userId)
       .single()
 
     if (!currentAnalysis) {
@@ -167,6 +179,7 @@ async function generateStrategy(supabase: any, userId: string, analysisId: strin
         updated_at: new Date().toISOString()
       })
       .eq('id', analysisId)
+      .eq('profile_id', userId)
       .select()
       .single()
 
@@ -198,7 +211,7 @@ async function updateNegotiation(supabase: any, userId: string, analysisId: stri
       .from('company_analysis')
       .select('*')
       .eq('id', analysisId)
-      .eq('user_profile_id', userId)
+      .eq('profile_id', userId)
       .single()
 
     if (!currentAnalysis) {
@@ -223,6 +236,7 @@ async function updateNegotiation(supabase: any, userId: string, analysisId: stri
         updated_at: new Date().toISOString()
       })
       .eq('id', analysisId)
+      .eq('profile_id', userId)
       .select()
       .single()
 
@@ -254,7 +268,7 @@ async function getAIInsights(supabase: any, userId: string, analysisId: string) 
       .from('company_analysis')
       .select('*')
       .eq('id', analysisId)
-      .eq('user_profile_id', userId)
+      .eq('profile_id', userId)
       .single()
 
     if (!analysis) {
@@ -265,7 +279,7 @@ async function getAIInsights(supabase: any, userId: string, analysisId: string) 
     const { data: relatedAnalysis } = await supabase
       .from('company_analysis')
       .select('*')
-      .eq('user_profile_id', userId)
+      .eq('profile_id', userId)
       .neq('id', analysisId)
       .order('created_at', { ascending: false })
       .limit(5)

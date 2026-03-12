@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
       market_analysis,
       ads_analysis,
       strategy,
-      user_profile
+      profile
     } = body || {}
 
     const encoder = new TextEncoder()
@@ -85,7 +85,7 @@ Base: ${ads_analysis ? JSON.stringify(ads_analysis).slice(0, 4000) : 'n/d'}`
             {
               title: 'Estratégia de Carreira Personalizada',
               prompt: `Escreva uma ESTRATÉGIA DE CARREIRA personalizada baseada no currículo do usuário, 2-3 parágrafos.
-Usuário: ${user_profile ? JSON.stringify(user_profile).slice(0, 4000) : 'n/d'}
+Usuário: ${profile ? JSON.stringify(profile).slice(0, 4000) : 'n/d'}
 Estratégia IA (se houver): ${strategy ? JSON.stringify(strategy).slice(0, 4000) : 'n/d'}`
             },
             {

@@ -24,15 +24,29 @@ export async function POST(request: NextRequest) {
       }, { status: 400 })
     }
 
-    // Verificar se a análise existe
+    // Buscar o profile_id real do usuário logado
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle()
+
+    if (!profile) {
+      return NextResponse.json({ error: 'Perfil não encontrado' }, { status: 404 })
+    }
+
+    const profileId = profile.id
+
+    // Verificar se a análise existe e pertence ao usuário
     const { data: analysis } = await supabase
       .from('company_analysis')
       .select('*')
       .eq('id', analysis_id)
+      .eq('profile_id', profileId)
       .single()
 
     if (!analysis) {
-      return NextResponse.json({ error: 'Análise não encontrada' }, { status: 404 })
+      return NextResponse.json({ error: 'Análise não encontrada ou não autorizada' }, { status: 404 })
     }
 
     // Criar registro de negociação
@@ -40,7 +54,7 @@ export async function POST(request: NextRequest) {
       .from('negotiations')
       .insert([{
         analysis_id,
-        user_id: user.id,
+        profile_id: profileId,
         negotiation_summary: negotiation_data.negotiation_summary,
         outcome: negotiation_data.outcome,
         agreed_value: negotiation_data.agreed_value,
@@ -149,12 +163,25 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'analysis_id é obrigatório' }, { status: 400 })
     }
 
+    // Buscar o profile_id real do usuário logado
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle()
+
+    if (!profile) {
+      return NextResponse.json({ error: 'Perfil não encontrado' }, { status: 404 })
+    }
+
+    const profileId = profile.id
+
     // Buscar negociações da análise
     const { data: negotiations, error } = await supabase
       .from('negotiations')
       .select('*')
       .eq('analysis_id', analysisId)
-      .eq('user_id', user.id)
+      .eq('profile_id', profileId)
       .order('created_at', { ascending: false })
 
     if (error) {

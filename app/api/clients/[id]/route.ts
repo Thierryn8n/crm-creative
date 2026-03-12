@@ -121,11 +121,19 @@ export async function DELETE(
     try {
       const { data: { user } } = await supabase.auth.getUser()
       if (user && client?.company_name) {
-        await supabase
-          .from('ai_search_memory')
-          .delete()
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('id')
           .eq('user_id', user.id)
-          .eq('company_name', client.company_name)
+          .maybeSingle()
+
+        if (profile) {
+          await supabase
+            .from('ai_search_memory')
+            .delete()
+            .eq('profile_id', profile.id)
+            .eq('company_name', client.company_name)
+        }
       }
     } catch (memError) {
       console.warn('Falha ao remover da memória da IA após exclusão:', memError)

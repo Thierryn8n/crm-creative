@@ -24,6 +24,12 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
           router.push('/login')
         } else {
           setAuthenticated(true)
+          // Garantir que o perfil exista ao autenticar
+          try {
+            await fetch('/api/user-profile', { method: 'GET' })
+          } catch (e) {
+            console.warn('Falha ao garantir perfil do usuário:', e)
+          }
         }
       } catch (error) {
         console.error('Erro ao verificar autenticação:', error)
@@ -41,6 +47,10 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
         router.push('/login')
       } else {
         setAuthenticated(true)
+        // Garantir perfil também em mudanças de sessão (ex.: pós-login, refresh)
+        fetch('/api/user-profile', { method: 'GET' }).catch(() => {
+          // Silenciar erros não críticos
+        })
       }
     })
 

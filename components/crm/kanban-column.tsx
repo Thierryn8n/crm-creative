@@ -2,15 +2,10 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { MoreVertical, ExternalLink } from 'lucide-react'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
+import { KanbanCard } from './kanban-card'
+import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { useDroppable } from '@dnd-kit/core'
 
 interface AIData {
   id: string
@@ -37,102 +32,45 @@ interface KanbanColumnProps {
 }
 
 export function KanbanColumn({ column, onStatusChange, onItemClick }: KanbanColumnProps) {
-  const getStatusBadgeVariant = (status: string) => {
-    switch (status) {
-      case 'pending':
-        return 'outline'
-      case 'analyzing':
-        return 'secondary'
-      case 'approved':
-        return 'default'
-      case 'rejected':
-        return 'destructive'
-      default:
-        return 'outline'
-    }
-  }
-
-  const getAnalysisTypeBadge = (type: string) => {
-    return type === 'pre_approval' ? 'Pré-aprovação' : 'Pós-aprovação'
-  }
+  const { setNodeRef } = useDroppable({
+    id: column.status,
+  })
 
   return (
-    <Card className={`${column.color} border-2`}>
-      <CardHeader className="pb-3">
+    <Card className={`${column.color} border-[3px] border-slate-900 dark:border-slate-950 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] dark:shadow-[8px_8px_0px_0px_rgba(255,255,255,1)] rounded-[2.5rem] overflow-hidden group`}>
+      <CardHeader className="pb-6 border-b-[3px] border-slate-900 dark:border-slate-950 bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-sm font-medium flex items-center gap-2">
+          <CardTitle className="text-sm font-black flex items-center gap-4 uppercase tracking-widest italic text-slate-900 dark:text-white">
+            <span className="w-3 h-3 rounded-full bg-slate-900 dark:bg-white group-hover:scale-125 transition-transform" />
             {column.title}
-            <Badge variant="secondary" className="text-xs">
+            <Badge className="bg-slate-900 dark:bg-white text-white dark:text-slate-900 border-2 border-slate-900 dark:border-white font-black px-4 py-1.5 rounded-xl shadow-[4px_4px_0px_0px_rgba(0,0,0,0.1)] group-hover:translate-x-1 transition-all">
               {column.items.length}
             </Badge>
           </CardTitle>
         </div>
       </CardHeader>
-      <CardContent className="p-3">
-        <ScrollArea className="h-[400px]">
-          <div className="space-y-3">
-            {column.items.map((item) => (
-              <Card
-                key={item.id}
-                className="cursor-pointer hover:shadow-md transition-shadow"
-                onClick={() => onItemClick(item)}
-              >
-                <CardContent className="p-3">
-                  <div className="space-y-2">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <h4 className="font-medium text-sm line-clamp-2">
-                          {item.company_name}
-                        </h4>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          {new Date(item.created_at).toLocaleDateString('pt-BR')}
-                        </p>
-                      </div>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
-                            <MoreVertical className="h-3 w-3" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={(e) => {
-                            e.stopPropagation()
-                            onItemClick(item)
-                          }}>
-                            <ExternalLink className="h-3 w-3 mr-2" />
-                            Ver Detalhes
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <Badge variant={getStatusBadgeVariant(item.status)} className="text-xs">
-                        {item.status}
-                      </Badge>
-                      <Badge variant="outline" className="text-xs">
-                        {getAnalysisTypeBadge(item.analysis_type)}
-                      </Badge>
-                    </div>
-
-                    {item.user_notes && (
-                      <div className="text-xs text-muted-foreground bg-muted p-2 rounded">
-                        <p className="line-clamp-2">{item.user_notes}</p>
-                      </div>
-                    )}
-
-                    {item.ai_data?.strategy_generated && (
-                      <div className="text-xs text-green-600 bg-green-50 p-2 rounded">
-                        <p>✓ Estratégia gerada</p>
-                      </div>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+      <CardContent className="p-6">
+        <ScrollArea className="h-[600px] pr-4 -mr-4">
+          <div ref={setNodeRef} className="space-y-6 min-h-[400px]">
+            <SortableContext 
+              items={column.items.map(i => i.id)} 
+              strategy={verticalListSortingStrategy}
+            >
+              {column.items.map((item) => (
+                <KanbanCard
+                  key={item.id}
+                  item={item}
+                  onItemClick={onItemClick}
+                />
+              ))}
+            </SortableContext>
+            
             {column.items.length === 0 && (
-              <div className="text-center text-muted-foreground py-8">
-                <p className="text-sm">Nenhum item nesta coluna</p>
+              <div className="flex flex-col items-center justify-center py-20 border-[3px] border-slate-900/10 dark:border-slate-100/10 border-dashed rounded-[2rem] bg-slate-50/30 dark:bg-slate-900/30 group-hover:border-slate-900/20 transition-colors">
+                <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4">
+                  <span className="text-2xl opacity-20 group-hover:opacity-40 transition-opacity">🗃️</span>
+                </div>
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 italic">Vazio</p>
               </div>
             )}
           </div>

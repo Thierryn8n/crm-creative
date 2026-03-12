@@ -4,11 +4,12 @@
 -- 1. Garantir que a extensão UUID existe
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- 2. Corrigir tabela de Perfis (user_profiles)
-CREATE TABLE IF NOT EXISTS public.user_profiles (
-  id uuid NOT NULL DEFAULT gen_random_uuid(), -- Pode ser o mesmo ID do auth.users se inserido manualmente, mas aqui deixamos flexível
+-- 2. Corrigir tabela de Perfis (profiles)
+CREATE TABLE IF NOT EXISTS public.profiles (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid UNIQUE REFERENCES auth.users(id) ON DELETE CASCADE,
   user_name varchar(255) NOT NULL,
-  email varchar(255) UNIQUE,
+  email varchar(255),
   phone varchar(50),
   linkedin_url text,
   indeed_url text,
@@ -27,7 +28,7 @@ CREATE TABLE IF NOT EXISTS public.user_profiles (
   profile_photo_url text,
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now(),
-  CONSTRAINT user_profiles_pkey PRIMARY KEY (id)
+  CONSTRAINT profiles_pkey PRIMARY KEY (id)
 );
 
 -- 3. Corrigir tabela de Currículos (user_resumes)
@@ -65,17 +66,17 @@ $$;
 -- Nota: Isso requer que o bucket 'user-files' e 'resumes' já existam. 
 -- Se não existirem, o botão 'Configurar Storage' irá criá-los usando a função acima.
 
--- Habilitar RLS nas tabelas (boa prática, mas vamos deixar permissivo por enquanto para evitar bloqueios)
-ALTER TABLE public.user_profiles ENABLE ROW LEVEL SECURITY;
+-- Habilitar RLS nas tabelas
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_resumes ENABLE ROW LEVEL SECURITY;
 
--- Políticas permissivas para user_profiles
-CREATE POLICY "Enable all access for all users" ON public.user_profiles
-FOR ALL USING (true) WITH CHECK (true);
+-- Políticas para profiles
+CREATE POLICY "Users can manage their own profile" ON public.profiles
+FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
--- Políticas permissivas para user_resumes
-CREATE POLICY "Enable all access for all users" ON public.user_resumes
-FOR ALL USING (true) WITH CHECK (true);
+-- Políticas para user_resumes
+CREATE POLICY "Users can manage their own resumes" ON public.user_resumes
+FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
 -- 6. Inserir Storage Buckets (Caso não existam - via SQL é complexo, melhor via API, mas podemos tentar insert direto)
 INSERT INTO storage.buckets (id, name, public)

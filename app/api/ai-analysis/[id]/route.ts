@@ -16,7 +16,7 @@ export async function PATCH(
     }
 
     const body = await request.json()
-    const { status, user_notes, negotiation_details, ai_data } = body
+    const { status, user_notes, negotiation_details, ai_data, kanban_order } = body
 
     // Preparar dados para atualização
     const updateData: any = {}
@@ -24,6 +24,7 @@ export async function PATCH(
     if (status !== undefined) updateData.analysis_status = status
     if (user_notes !== undefined) updateData.notes = user_notes
     if (negotiation_details !== undefined) updateData.negotiation_summary = negotiation_details
+    if (kanban_order !== undefined) updateData.kanban_order = kanban_order
     
     // Atualizar dados da IA se fornecidos
     if (ai_data) {
@@ -38,12 +39,25 @@ export async function PATCH(
     // Atualizar timestamp
     updateData.updated_at = new Date().toISOString()
 
+    // Buscar o profile_id real do usuário logado
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle()
+
+    if (!profile) {
+      return NextResponse.json({ error: 'Perfil não encontrado' }, { status: 404 })
+    }
+
+    const profileId = profile.id
+
     // Atualizar análise
     const { data: updatedAnalysis, error } = await supabase
       .from('company_analysis')
       .update(updateData)
       .eq('id', params.id)
-      .eq('user_profile_id', user.id) // Garantir que só o dono pode atualizar
+      .eq('profile_id', profileId) // Garantir que só o dono pode atualizar
       .select()
       .single()
 
@@ -89,12 +103,25 @@ export async function DELETE(
       return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
     }
 
+    // 2. Deletar análise
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle()
+
+    if (!profile) {
+      return NextResponse.json({ error: 'Perfil não encontrado' }, { status: 404 })
+    }
+
+    const profileId = profile.id
+
     // 1. Buscar o nome da empresa antes de deletar
     const { data: analysis, error: fetchError } = await supabase
       .from('company_analysis')
       .select('company_name')
       .eq('id', params.id)
-      .eq('user_profile_id', user.id)
+      .eq('profile_id', profileId)
       .single()
 
     if (fetchError) {
@@ -106,7 +133,7 @@ export async function DELETE(
       .from('company_analysis')
       .delete()
       .eq('id', params.id)
-      .eq('user_profile_id', user.id) // Garantir que só o dono pode deletar
+      .eq('profile_id', profileId) // Garantir que só o dono pode deletar
 
     if (deleteError) {
       console.error('Erro ao deletar análise:', deleteError)
@@ -122,7 +149,7 @@ export async function DELETE(
         await supabase
           .from('ai_search_memory')
           .delete()
-          .eq('user_id', user.id)
+          .eq('profile_id', profileId)
           .eq('company_name', analysis.company_name)
       }
     } catch (memError) {

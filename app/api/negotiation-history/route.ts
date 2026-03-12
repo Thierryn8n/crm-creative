@@ -12,6 +12,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
     }
 
+    // Buscar profile_id do usuário
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle()
+
+    if (!profile) {
+      return NextResponse.json({ error: 'Perfil não encontrado' }, { status: 404 })
+    }
+
     const body = await request.json()
     const { 
       approved_company_id, 
@@ -34,7 +45,7 @@ export async function POST(request: NextRequest) {
       .from('approved_companies')
       .select('company_name, negotiation_status')
       .eq('id', approved_company_id)
-      .eq('user_id', user.id)
+      .eq('profile_id', profile.id)
       .single()
 
     if (companyError || !companyData) {
@@ -47,7 +58,7 @@ export async function POST(request: NextRequest) {
     // Criar registro de histórico
     const historyData = {
       approved_company_id,
-      user_id: user.id,
+      profile_id: profile.id,
       action_type,
       description,
       outcome: outcome || null,
@@ -92,13 +103,13 @@ export async function POST(request: NextRequest) {
           last_contact_date: new Date().toISOString()
         })
         .eq('id', approved_company_id)
-        .eq('user_id', user.id)
+        .eq('profile_id', profile.id)
     }
 
     // Criar insight da IA sobre a negociação
     const insightData = {
       approved_company_id,
-      user_id: user.id,
+      profile_id: profile.id,
       insight_type: 'recommendation',
       title: `Negociação: ${action_type}`,
       content: aiAnalysis.analysis,
@@ -203,6 +214,17 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
     }
 
+    // Buscar profile_id do usuário
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle()
+
+    if (!profile) {
+      return NextResponse.json({ error: 'Perfil não encontrado' }, { status: 404 })
+    }
+
     const { searchParams } = new URL(request.url)
     const approved_company_id = searchParams.get('approved_company_id')
 
@@ -215,7 +237,7 @@ export async function GET(request: NextRequest) {
       .from('negotiation_history')
       .select('*')
       .eq('approved_company_id', approved_company_id)
-      .eq('user_id', user.id)
+      .eq('profile_id', profile.id)
       .order('created_at', { ascending: false })
 
     if (error) {

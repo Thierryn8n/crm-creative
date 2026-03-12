@@ -23,15 +23,28 @@ export async function POST(request: NextRequest) {
 
     // 0. Buscar histórico da memória para orientar a IA
     let recentMemory: any[] | null = null
+    let profile: any = null
+
     try {
       if (user) {
-        const { data } = await supabase
-          .from('ai_search_memory')
-          .select('company_name, status, feedback_notes')
+        // Buscar profile_id
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('id')
           .eq('user_id', user.id)
-          .order('last_discovered_at', { ascending: false })
-          .limit(20)
-        recentMemory = data
+          .maybeSingle()
+        
+        profile = profileData
+
+        if (profile) {
+          const { data } = await supabase
+            .from('ai_search_memory')
+            .select('company_name, status, feedback_notes')
+            .eq('profile_id', profile.id)
+            .order('last_discovered_at', { ascending: false })
+            .limit(20)
+          recentMemory = data
+        }
       }
     } catch (e) {
       console.warn('Error fetching search memory (ignoring):', e)
@@ -376,18 +389,26 @@ ${recentMemory.map((m: any) => `- ${m.company_name} (Status: ${m.status}${m.feed
     let duplicatesAvoided = 0
     let saveFailures = 0
     let dbWarning: string | null = null
+    let newCompanies: any[] = []
 
     try {
       const supabase = await createClient()
+      
+      const insertData: any = {
+        query: `${query} ${location || ''}`,
+        results: { companies: visibleResults },
+        clients_added: 0,
+        result_count: resultCount,
+        full_data: { companies: visibleResults }
+      }
+
+      if (profile) {
+        insertData.profile_id = profile.id
+      }
+
       const { data: searchData, error: searchError } = await supabase
         .from('ai_searches')
-        .insert([{
-          query: `${query} ${location || ''}`,
-          results: { companies: visibleResults },
-          clients_added: 0,
-          result_count: resultCount,
-          full_data: { companies: visibleResults }
-        }])
+        .insert([insertData])
         .select()
         .single()
 
@@ -410,11 +431,15 @@ ${recentMemory.map((m: any) => `- ${m.company_name} (Status: ${m.status}${m.feed
         .in('company_name', companyNames)
 
       // 2. Check AI search memory (ignored or rejected companies)
-      const { data: searchMemory } = await supabase
-        .from('ai_search_memory')
-        .select('company_name, status')
-        .eq('user_id', user?.id)
-        .in('company_name', companyNames)
+      let searchMemory: any[] | null = null
+      if (profile) {
+        const { data } = await supabase
+          .from('ai_search_memory')
+          .select('company_name, status')
+          .eq('profile_id', profile.id)
+          .in('company_name', companyNames)
+        searchMemory = data
+      }
 
       const existingCompanyNames = new Set([
         ...(existingClients?.map(c => c.company_name) || []),

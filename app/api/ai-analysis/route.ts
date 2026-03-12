@@ -15,10 +15,25 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
     }
 
-    // Buscar análises da IA
+    // Buscar o profile_id real do usuário logado
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle()
+
+    if (!profile) {
+      return NextResponse.json({ error: 'Perfil não encontrado' }, { status: 404 })
+    }
+
+    const profileId = profile.id
+
+    // Buscar análises da IA vinculadas ao perfil do usuário
     let query = supabase
       .from('company_analysis')
       .select(`*`)
+      .eq('profile_id', profileId)
+      .order('kanban_order', { ascending: true })
       .order('created_at', { ascending: false })
 
     if (relatedClientId) {
@@ -53,6 +68,7 @@ export async function GET(request: NextRequest) {
       },
       user_notes: analysis.notes,
       negotiation_details: analysis.negotiation_summary,
+      kanban_order: analysis.kanban_order || 0,
       created_at: analysis.created_at,
       updated_at: analysis.updated_at || analysis.last_updated
     })) || []
@@ -88,12 +104,25 @@ export async function POST(request: NextRequest) {
       negotiation_details 
     } = body
 
+    // Buscar o profile_id real do usuário logado
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle()
+
+    if (!profile) {
+      return NextResponse.json({ error: 'Perfil não encontrado' }, { status: 404 })
+    }
+
+    const profileId = profile.id
+
     // Criar nova análise
     const { data: newAnalysis, error } = await supabase
       .from('company_analysis')
       .insert([{
         company_name,
-        user_profile_id: user.id,
+        profile_id: profileId,
         website_analysis: ai_data?.website_analysis,
         social_media_analysis: ai_data?.social_media,
         linkedin_data: ai_data?.linkedin_data,

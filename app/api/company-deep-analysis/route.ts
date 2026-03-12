@@ -128,29 +128,29 @@ async function getUserProfile(supabase: any, userId: string) {
   
   // 1. Buscar dados básicos do perfil
   const { data: profile, error: profileError } = await supabase
-    .from('user_profiles')
+    .from('profiles')
     .select('*')
-    .eq('id', userId)
+    .eq('user_id', userId)
     .single()
   
   // 2. Buscar o currículo mais recente na tabela user_resumes
   const { data: resume, error: resumeError } = await supabase
     .from('user_resumes')
     .select('*')
-    .eq('user_id', userId)
+    .eq('profile_id', profile?.id)
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle()
 
   if (resumeError) {
-    console.error(`[Analysis] Erro ao buscar currículo para ${userId}:`, resumeError.message)
+    console.error(`[Analysis] Erro ao buscar currículo para ${profile?.id}:`, resumeError.message)
   }
 
   // 3. Buscar itens do portfólio
   const { data: portfolio, error: portfolioError } = await supabase
     .from('portfolio_items')
     .select('*')
-    .eq('user_id', userId)
+    .eq('profile_id', profile?.id)
     .order('created_at', { ascending: false })
 
   if (profileError && !profile) {
@@ -169,12 +169,12 @@ async function getUserProfile(supabase: any, userId: string) {
   let finalResumeText = ''
   let source = ''
 
-  // 1. PRIORIDADE ABSOLUTA: Coluna resume_text da tabela user_profiles
+  // 1. PRIORIDADE ABSOLUTA: Coluna resume_text da tabela profiles
   // O usuário confirmou que a coluna existe e deve ser usada.
   if (profile?.resume_text && profile.resume_text.trim().length > 5) {
       console.log('[Analysis] ✅ USANDO TEXTO DO BANCO (resume_text):', profile.resume_text.substring(0, 50))
       finalResumeText = profile.resume_text
-      source = 'user_profiles.resume_text (DIRETO DO BANCO)'
+      source = 'profiles.resume_text (DIRETO DO BANCO)'
   } 
   
   // 2. Se a coluna estiver vazia, tenta pegar da tabela user_resumes (BACKUP)
@@ -182,11 +182,11 @@ async function getUserProfile(supabase: any, userId: string) {
     finalResumeText = resume.content
     source = 'user_resumes (DB)'
     // Se achou aqui mas não no perfil, já atualiza o perfil para ficar rápido na próxima
-    if (userId) {
-      await supabase.from('user_profiles').update({ 
+    if (profile?.id) {
+      await supabase.from('profiles').update({ 
         resume_text: finalResumeText,
         updated_at: new Date().toISOString()
-      }).eq('id', userId)
+      }).eq('id', profile.id)
     }
   }
 
@@ -295,11 +295,13 @@ async function getUserProfile(supabase: any, userId: string) {
                 }).eq('id', resume.id)
               }
               
-              // Atualiza user_profiles (sincronização)
-              await admin.from('user_profiles').update({ 
-                resume_text: extractedText,
-                updated_at: new Date().toISOString()
-              }).eq('id', userId)
+              // Atualiza profiles (sincronização)
+              if (profile?.id) {
+                await admin.from('profiles').update({ 
+                  resume_text: extractedText,
+                  updated_at: new Date().toISOString()
+                }).eq('id', profile.id)
+              }
             }
           } else {
             console.error('[Analysis] Erro na API Gemini para extração:', await aiRes.text())
@@ -465,44 +467,46 @@ Responda APENAS with the JSON. Se não encontrar dados concretos, use null.
   return result
 }
 
-async function generatePersonalizedStrategy(companyName: string, industry: string, userProfile: any, analysisData: any, webData: any, isDeepSearch = false) {
+async function generatePersonalizedStrategy(companyName: string, industry: string, profile: any, analysisData: any, webData: any, isDeepSearch = false) {
   const prompt = `
 ${isDeepSearch ? '🔥 RECONSTRUÇÃO DE ESTRATÉGIA: O usuário solicitou uma estratégia mais profunda. Analise detalhadamente como o perfil do candidato se conecta com os dados REAIS da empresa e crie um plano tático agressivo.' : 'Crie uma estratégia personalizada multidimensional e ALTAMENTE ACIONÁVEL para o usuário conseguir fechar um contrato B2B ou vaga with the ${companyName}.'}
 
 REGRAS CRÍTICAS DE PERSONALIZAÇÃO (OBRIGATÓRIO):
-1. IDENTIDADE ÚNICA: O Pitch de E-mail e ROTEIRO WHATSAPP NÃO PODEM ser genéricos. Devem soar como se tivessem sido escritos por ${userProfile.user_name || 'o usuário'} especificamente para esta empresa.
+1. IDENTIDADE ÚNICA: O Pitch de E-mail e ROTEIRO WHATSAPP NÃO PODEM ser genéricos. Devem soar como se tivessem sido escritos por ${profile.user_name || 'o usuário'} especificamente para esta empresa.
 2. INTEGRAÇÃO DO CURRÍCULO (OBRIGATÓRIO): Use fatos, anos de experiência e conquistas REAIS listadas no 'resume_text' abaixo. TANTO O EMAIL QUANTO O WHATSAPP devem mencionar experiências específicas do currículo como prova de competência.
-3. PROVA SOCIAL DO PORTFÓLIO: Cite nominalmente pelo menos 1 projeto do portfólio do usuário que resolva um problema similar ao que esta empresa enfrenta. IMPORTANTE: No final do email e do whatsapp, use SEMPRE o link do portfólio pessoal (${userProfile.portfolio_url || 'https://thierrycreative.vercel.app'}) e JAMAIS use links de terceiros como Behance, Dribbble ou GitHub, a menos que o usuário não tenha site próprio.
-4. CONEXÃO COM A DOR: Não apenas liste skills. Explique COMO a experiência do usuário (vinda do currículo) resolve as dores específicas da ${companyName} identificadas na análise (EM EMAIL E WHATSAPP).
-5. TONE & SENIORIDADE: Ajuste o tom para refletir a senioridade real do usuário (Ex: Se tem 10 anos, fale como sênior/estrategista; se tem 2, fale como executor ágil) - APLICAR AOS DOIS ROTEIROS.
-6. ROTEIRO WHATSAPP ESPECÍFICO: O script WhatsApp DEVE ser mais curto e direto que o email, mas igualmente personalizado com dados do currículo. Use tom conversacional e mencione rapidamente uma conquista específica do currículo.
+3. CONTEXTO DO PORTFÓLIO: Se houver itens de portfólio, mencione como eles resolvem dores da empresa.
+4. TOM DE VOZ: Ajuste o tom de acordo com a cultura da empresa (ex: mais formal para advocacia, mais descontraído para agência de design).
 
 DADOS DA EMPRESA:
 - Nome: ${companyName}
-- Setor: ${industry || 'Tecnologia'}
-- Cultura: ${JSON.stringify(analysisData.website?.culture || {}, null, 2)}
-- Tecnologias: ${JSON.stringify(analysisData.website?.tech_stack || [], null, 2)}
-- Mercado: ${analysisData.market_ads?.market?.position || 'Não detectado'}
+- Setor: ${industry}
+- Análise do Site: ${JSON.stringify(analysisData.website || {}, null, 2)}
+- Redes Sociais: ${JSON.stringify(analysisData.social || {}, null, 2)}
+- Mercado e Ads: ${JSON.stringify(analysisData.market_ads || {}, null, 2)}
+- Dados Brutos Web: ${JSON.stringify(webData || {}, null, 2)}
 
-PERFIL DO USUÁRIO (O SEU PITCH DEVE SER BASEADO EXCLUSIVAMENTE NESTES DADOS):
-- Nome: ${userProfile.user_name}
-- Bio: ${userProfile.bio || 'Não informada'}
-- Experiência: ${userProfile.experience_years} anos
-- Skills: ${JSON.stringify(userProfile.skills || [])}
-- Especialidades: ${JSON.stringify(userProfile.specialties || [])}
-- CURRÍCULO COMPLETO (BASE PARA O PITCH): ${userProfile.resume_text ? userProfile.resume_text.substring(0, 10000) : 'ERRO CRÍTICO: NENHUM CURRÍCULO ENCONTRADO NO BANCO DE DADOS. Não invente dados. Informe explicitamente ao usuário que ele precisa fazer o upload do PDF na aba Perfil para gerar pitches personalizados.'}
-- PORTFÓLIO PRINCIPAL (USE ESTE LINK): ${userProfile.portfolio_url || 'https://thierrycreative.vercel.app'}
-- PROJETOS DO PORTFÓLIO: ${JSON.stringify(userProfile.portfolio?.map((p: any) => ({ title: p.title, desc: p.description, type: p.type })) || [])}
+PERFIL DO USUÁRIO (CURRÍCULO):
+- Nome: ${profile.user_name || 'Usuário'}
+- Especialidades: ${profile.specialties?.join(', ') || 'Não informado'}
+- Habilidades: ${profile.skills?.join(', ') || 'Não informado'}
+- Experiência: ${profile.experience_years} anos
+- Currículo (Texto Completo):
+${profile.resume_text || 'Não disponível'}
 
-Retorne um JSON com esta estrutura:
+PORTFÓLIO:
+${JSON.stringify(profile.portfolio || [], null, 2)}
+
+Retorne um objeto JSON com:
 {
+  "executive_summary": "Resumo de 1 parágrafo da oportunidade e por que o usuário é o fit perfeito.",
+  "suggested_approach": "Abordagem sugerida (ex: Venda Direta, Candidatura, Networking)",
   "pain_points": ["3 dores REAIS identificadas na empresa"],
   "value_proposition": "como o usuário resolve essas dores especificamente usando sua experiência e currículo",
   "networking": { "opportunities": ["grupos ou eventos onde encontrar decisores"], "effective_channels": ["LinkedIn", "Email Direto", etc] },
   "interview_prep": { "likely_questions": ["3 perguntas prováveis baseadas na cultura da empresa"], "strategy_tips": ["dicas de comportamento/respostas"] },
   "skills_to_highlight": ["skills do currículo do usuário que mais brilham para esta empresa"],
   "outreach": {
-    "whatsapp_script": "Script de abordagem via WhatsApp BASEADO EXCLUSIVAMENTE NO CURRÍCULO DO USUÁRIO. DEVE: 1) Mencionar experiência específica do currículo que resolve dor da empresa, 2) Citar projeto do portfólio como prova social, 3) Ser direto e pessoal como se ${userProfile.user_name} estivesse falando, 4) Conectar skills do currículo com necessidades da empresa, 5) Ter tom adequado à senioridade (júnior/mid/sênior baseado em ${userProfile.experience_years} anos).",
+    "whatsapp_script": "Script de abordagem via WhatsApp BASEADO EXCLUSIVAMENTE NO CURRÍCULO DO USUÁRIO. DEVE: 1) Mencionar experiência específica do currículo que resolve dor da empresa, 2) Citar projeto do portfólio como prova social, 3) Ser direto e pessoal como se ${profile.user_name} estivesse falando, 4) Conectar skills do currículo com necessidades da empresa, 5) Ter tom adequado à senioridade (júnior/mid/sênior baseado em ${profile.experience_years} anos).",
     "email_pitch": "Pitch B2B completo e profissional. DEVE SER BASEADO NO CURRÍCULO E PORTFÓLIO DO USUÁRIO. Use as experiências e conquistas dele como prova social central. O texto deve ser persuasivo e focado em ROI ou solução de problemas técnicos."
   },
   "action_plan": {
@@ -533,7 +537,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 0. BUSCAR PERFIL DO USUÁRIO PRIMEIRO (Para garantir que temos o currículo mais recente)
-    const userProfile = await getUserProfile(supabase, user.id)
+    const profileData = await getUserProfile(supabase, user.id)
 
     // Se for uma análise parcial (de uma seção específica), ignoramos o cache e forçamos a busca profunda
     if (section) {
@@ -577,12 +581,12 @@ export async function POST(request: NextRequest) {
           social: JSON.parse(s),
           market_ads: JSON.parse(m)
         }
-        const res = await generatePersonalizedStrategy(companyName, industry || 'Tecnologia', userProfile, analysisData, webData, true)
+        const res = await generatePersonalizedStrategy(companyName, industry || 'Tecnologia', profileData, analysisData, webData, true)
         result.personalizedStrategy = JSON.parse(res)
       }
 
       // Adiciona o perfil atualizado na resposta parcial
-      result.userProfile = userProfile
+      result.profileData = profileData
       return NextResponse.json(result)
     }
 
@@ -591,7 +595,6 @@ export async function POST(request: NextRequest) {
     const { data: approvedCompany, error: approvedError } = await supabase
       .from('approved_companies')
       .select('*')
-      .eq('user_id', user.id)
       .eq('company_name', companyName)
       .maybeSingle()
 
@@ -614,7 +617,7 @@ export async function POST(request: NextRequest) {
             personalizedStrategy: savedStrategy || {},
             webData: approvedCompany.full_company_data || {},
             analyzedAt: approvedCompany.updated_at || approvedCompany.created_at,
-            userProfile: userProfile,
+            profileData: profileData,
             metadata: {
               watermark: 'processed_by_crm_creative_ai',
               cached: true,
@@ -631,11 +634,11 @@ export async function POST(request: NextRequest) {
     }
 
     // 1. TENTAR RECUPERAR ANÁLISE JÁ EXISTENTE NO SUPABASE (apenas para análise completa)
-    console.log(`[Analysis] Buscando análise existente para ${companyName} (user_id: ${user.id})...`)
+    console.log(`[Analysis] Buscando análise existente para ${companyName} (profile_id: ${profileData.id})...`)
     const { data: existingAnalysis, error: fetchError } = await supabase
       .from('company_analysis')
       .select('*')
-      .eq('user_id', user.id)
+      .eq('profile_id', profileData.id)
       .eq('company_name', companyName)
       .maybeSingle()
 
@@ -648,7 +651,7 @@ export async function POST(request: NextRequest) {
       
       // VERIFICAÇÃO DE OBSOLESCÊNCIA: Se o currículo mudou depois da análise, INVALIDA O CACHE
       const analysisDate = new Date(existingAnalysis.last_updated || existingAnalysis.created_at)
-      const profileDate = new Date(userProfile.updated_at || '2000-01-01')
+      const profileDate = new Date(profileData.updated_at || '2000-01-01')
       
       // Se o perfil foi atualizado DEPOIS da análise, precisamos refazer a estratégia
       if (profileDate > analysisDate) {
@@ -668,7 +671,7 @@ export async function POST(request: NextRequest) {
           personalizedStrategy: existingAnalysis.ai_strategy,
           webData: existingAnalysis.full_company_data,
           analyzedAt: existingAnalysis.last_updated || new Date().toISOString(),
-          userProfile: userProfile, // <--- ADICIONADO: Perfil sempre fresco na resposta
+          profileData: profileData, // <--- ADICIONADO: Perfil sempre fresco na resposta
           debug: {
             hasWebsiteData: !!existingAnalysis.website_analysis,
             hasSocialMediaData: !!existingAnalysis.social_media_presence,
@@ -785,7 +788,7 @@ export async function POST(request: NextRequest) {
 
     // Etapa 2: Estratégia Personalizada (Baseada na Etapa 1)
     console.log(`[Analysis] 🧠 Etapa 2: Gerando estratégia personalizada...`)
-    const strategyRes = await generatePersonalizedStrategy(companyName, industry || 'Tecnologia', userProfile, intermediateAnalysis, webData)
+    const strategyRes = await generatePersonalizedStrategy(companyName, industry || 'Tecnologia', profileData, intermediateAnalysis, webData)
     
     const personalizedStrategy = safeParse(strategyRes, 'strategyRes')
     if (personalizedStrategy) {
@@ -803,7 +806,7 @@ export async function POST(request: NextRequest) {
       social: socialMediaAnalysis || {},
       market_ads: marketAndAdsAnalysis || {},
       personalizedStrategy: personalizedStrategy || {},
-      userProfile: userProfile || {},
+      profileData: profileData || {},
       analyzedAt: new Date().toISOString(),
       metadata: {
         watermark: 'processed_by_crm_creative_ai',
@@ -821,7 +824,7 @@ export async function POST(request: NextRequest) {
     // Salvar análise (Usando upsert para atualizar se já existir para este usuário)
     console.log(`[Analysis] 💾 Salvando resultados no banco de dados (upsert)...`)
     const { error: insertError } = await supabase.from('company_analysis').upsert({
-      user_id: user.id,
+      profile_id: profileData.id,
       company_name: companyName,
       full_company_data: webData, // Salva o objeto completo retornado pelo scraper
       website_analysis: websiteAnalysis,
@@ -833,7 +836,7 @@ export async function POST(request: NextRequest) {
       analysis_status: 'completed',
       last_updated: new Date().toISOString()
     }, { 
-      onConflict: 'user_id,company_name' 
+      onConflict: 'profile_id,company_name' 
     })
     
     if (insertError) {

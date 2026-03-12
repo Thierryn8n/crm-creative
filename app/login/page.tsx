@@ -43,8 +43,16 @@ export default function LoginPage() {
       if (error) {
         setError(error.message)
       } else if (data.user) {
-        router.push('/')
-        router.refresh()
+        try {
+          // Garantir criação/atualização do perfil imediatamente após login
+          await fetch('/api/user-profile', { method: 'GET' })
+        } catch (e) {
+          // Não bloquear login caso falhe
+          console.warn('Falha ao garantir perfil após login:', e)
+        } finally {
+          router.push('/')
+          router.refresh()
+        }
       }
     } catch (error) {
       setError('Erro ao fazer login. Tente novamente.')
@@ -77,15 +85,15 @@ export default function LoginPage() {
   ]
 
   return (
-    <div className="min-h-screen flex flex-col md:flex-row bg-white dark:bg-slate-950 overflow-hidden">
+    <div className="h-screen flex flex-col md:flex-row bg-white dark:bg-slate-950 overflow-hidden">
       {/* Coluna da Esquerda - Informações/Marketing */}
-      <div className="hidden md:flex md:w-1/2 bg-slate-50 dark:bg-slate-900 border-r-4 border-slate-900 dark:border-slate-800 p-12 flex-col justify-between relative overflow-hidden">
+      <div className="hidden md:flex md:w-1/2 h-full bg-slate-50 dark:bg-slate-900 border-r-4 border-slate-900 dark:border-slate-800 p-8 flex-col justify-between relative overflow-hidden">
         {/* Decorativo de fundo */}
         <div className="absolute top-[-10%] right-[-10%] w-64 h-64 bg-primary/10 rounded-full blur-3xl" />
         <div className="absolute bottom-[-5%] left-[-5%] w-80 h-80 bg-blue-500/10 rounded-full blur-3xl" />
         
         <div className="relative z-10">
-          <div className="inline-flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-xl border-2 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] mb-12">
+          <div className="inline-flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-xl border-2 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] mb-8">
             <Zap className="w-5 h-5 text-primary" />
             <span className="font-black uppercase tracking-tighter text-sm">CRM Creative AI</span>
           </div>
@@ -95,11 +103,11 @@ export default function LoginPage() {
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.5 }}
           >
-            <h1 className="text-5xl lg:text-6xl font-black text-slate-900 dark:text-white leading-[1.1] mb-6 tracking-tighter">
+            <h1 className="text-5xl lg:text-6xl font-black text-slate-900 dark:text-white leading-[1.1] mb-4 tracking-tighter">
               Conquiste Grandes <br />
               <span className="text-primary underline decoration-8 decoration-primary/30 underline-offset-4">Clientes B2B</span>
             </h1>
-            <p className="text-xl text-slate-600 dark:text-slate-400 font-medium max-w-lg leading-relaxed mb-12">
+            <p className="text-lg text-slate-600 dark:text-slate-400 font-medium max-w-lg leading-relaxed mb-8">
               A plataforma definitiva para designers que desejam vender serviços criativos para empresas com inteligência e escala.
             </p>
           </motion.div>
@@ -127,7 +135,7 @@ export default function LoginPage() {
           </div>
         </div>
 
-        <div className="relative z-10 pt-12 border-t-2 border-slate-200 dark:border-slate-800 flex items-center justify-between">
+        <div className="relative z-10 pt-6 border-t-2 border-slate-200 dark:border-slate-800 flex items-center justify-between">
           <p className="text-sm font-bold text-slate-400">© 2026 CRM Creative AI</p>
           <div className="flex gap-4">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
@@ -137,21 +145,21 @@ export default function LoginPage() {
       </div>
 
       {/* Coluna da Direita - Login */}
-      <div className="flex-1 flex items-center justify-center p-8 bg-white dark:bg-slate-950 relative">
+      <div className="flex-1 h-full flex items-center justify-center p-8 bg-white dark:bg-slate-950 relative overflow-hidden">
         {/* Background dots for Neo-brutalism */}
         <div className="absolute inset-0 opacity-[0.03] dark:opacity-[0.05] pointer-events-none" 
              style={{ backgroundImage: 'radial-gradient(circle, #000 1px, transparent 1px)', backgroundSize: '24px 24px' }} />
 
         <div className="w-full max-w-md relative z-10">
-          <div className="md:hidden flex justify-center mb-8">
+          <div className="md:hidden flex justify-center mb-6">
             <div className="inline-flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-xl border-2 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
               <Zap className="w-5 h-5 text-primary" />
               <span className="font-black uppercase tracking-tighter text-sm">CRM Creative AI</span>
             </div>
           </div>
 
-          <div className="mb-10 text-center md:text-left">
-            <h2 className="text-4xl font-black text-slate-900 dark:text-white mb-3 tracking-tighter uppercase">
+          <div className="mb-4 text-center md:text-left">
+            <h2 className="text-3xl font-black text-slate-900 dark:text-white mb-2 tracking-tighter uppercase">
               Bem-vindo
             </h2>
             <p className="text-slate-500 dark:text-slate-400 font-bold">
@@ -159,7 +167,7 @@ export default function LoginPage() {
             </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-6">
+          <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
               <motion.div
                 initial={{ opacity: 0, y: -10 }}
@@ -190,7 +198,7 @@ export default function LoginPage() {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     required
-                    className="pl-12 h-14 bg-white dark:bg-slate-900 border-2 border-slate-900 dark:border-slate-800 rounded-2xl font-bold text-slate-900 dark:text-white placeholder:text-slate-300 dark:placeholder:text-slate-700 focus:ring-0 focus:border-primary shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.05)] focus:shadow-none transition-all"
+                    className="pl-12 h-12 bg-white dark:bg-slate-900 border-2 border-slate-900 dark:border-slate-800 rounded-2xl font-bold text-slate-900 dark:text-white placeholder:text-slate-300 dark:placeholder:text-slate-700 focus:ring-0 focus:border-primary shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.05)] focus:shadow-none transition-all"
                   />
                 </div>
               </div>
@@ -218,7 +226,7 @@ export default function LoginPage() {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
-                    className="pl-12 h-14 bg-white dark:bg-slate-900 border-2 border-slate-900 dark:border-slate-800 rounded-2xl font-bold text-slate-900 dark:text-white placeholder:text-slate-300 dark:placeholder:text-slate-700 focus:ring-0 focus:border-primary shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.05)] focus:shadow-none transition-all"
+                    className="pl-12 h-12 bg-white dark:bg-slate-900 border-2 border-slate-900 dark:border-slate-800 rounded-2xl font-bold text-slate-900 dark:text-white placeholder:text-slate-300 dark:placeholder:text-slate-700 focus:ring-0 focus:border-primary shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.05)] focus:shadow-none transition-all"
                   />
                 </div>
               </div>
@@ -227,7 +235,7 @@ export default function LoginPage() {
             <Button
               type="submit"
               disabled={loading}
-              className="w-full h-14 bg-slate-900 hover:bg-slate-800 dark:bg-primary dark:hover:bg-primary/90 text-white rounded-2xl border-2 border-black font-black uppercase tracking-[0.2em] text-sm shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_0px_rgba(0,0,0,0.3)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:shadow-none active:translate-x-[6px] active:translate-y-[6px] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full h-12 bg-slate-900 hover:bg-slate-800 dark:bg-primary dark:hover:bg-primary/90 text-white rounded-2xl border-2 border-black font-black uppercase tracking-[0.2em] text-sm shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_0px_rgba(0,0,0,0.3)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:shadow-none active:translate-x-[6px] active:translate-y-[6px] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? (
                 <Loader2 className="w-5 h-5 animate-spin mr-2" />
@@ -239,7 +247,7 @@ export default function LoginPage() {
               )}
             </Button>
 
-            <div className="relative py-4">
+            <div className="relative py-2">
               <div className="absolute inset-0 flex items-center">
                 <span className="w-full border-t-2 border-slate-100 dark:border-slate-900"></span>
               </div>
@@ -251,7 +259,7 @@ export default function LoginPage() {
             <Button
               type="button"
               variant="outline"
-              className="w-full h-14 bg-white dark:bg-slate-900 border-2 border-slate-900 dark:border-slate-800 rounded-2xl font-black uppercase tracking-[0.2em] text-xs shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.05)] hover:shadow-none hover:translate-x-[4px] hover:translate-y-[4px] transition-all"
+              className="w-full h-12 bg-white dark:bg-slate-900 border-2 border-slate-900 dark:border-slate-800 rounded-2xl font-black uppercase tracking-[0.2em] text-xs shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.05)] hover:shadow-none hover:translate-x-[4px] hover:translate-y-[4px] transition-all"
             >
               <svg className="w-5 h-5 mr-3" viewBox="0 0 24 24">
                 <path

@@ -11,6 +11,21 @@ import { Brain, Save, Handshake, ArrowLeft, Eye, TrendingUp, Target, Shield, Zap
 import { AIIntelligencePanel } from '@/components/crm/ai-intelligence-panel'
 import { AISaveManager } from '@/components/crm/ai-save-manager'
 import { NegotiationForm } from '@/components/crm/negotiation-form'
+import { KanbanColumn } from '@/components/crm/kanban-column'
+import { KanbanCard } from '@/components/crm/kanban-card'
+import { 
+  DndContext, 
+  DragOverlay, 
+  closestCorners, 
+  KeyboardSensor, 
+  PointerSensor, 
+  useSensor, 
+  useSensors,
+  DragEndEvent,
+  DragOverEvent,
+  defaultDropAnimationSideEffects
+} from '@dnd-kit/core'
+import { arrayMove, sortableKeyboardCoordinates } from '@dnd-kit/sortable'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 
@@ -22,6 +37,7 @@ type Analysis = {
   ai_data: any
   user_notes?: string | null
   negotiation_details?: any
+  kanban_order?: number
   created_at: string
   updated_at: string
 }
@@ -84,20 +100,31 @@ export default function ApprovedClientAIPanel() {
   const params = useParams() as { id: string }
   const router = useRouter()
   const [analysis, setAnalysis] = useState<Analysis | null>(null)
+  const [allAnalyses, setAllAnalyses] = useState<Analysis[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState('overview')
+  const [activeTab, setActiveTab] = useState('kanban')
+  const [activeId, setActiveId] = useState<string | null>(null)
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  )
 
   useEffect(() => {
     const loadData = async () => {
       setLoading(true)
       setError(null)
       try {
-        // 1. Tentar buscar pelo ID do cliente relacionado
         let res = await fetch(`/api/ai-analysis?related_client_id=${params.id}`)
         let data = await res.json()
         
-        // 2. Se não encontrar pelo ID, buscar o nome do cliente primeiro e depois tentar pelo nome da empresa
         if (res.ok && (!Array.isArray(data) || data.length === 0)) {
           const clientRes = await fetch(`/api/clients/${params.id}`)
           if (clientRes.ok) {
@@ -112,10 +139,12 @@ export default function ApprovedClientAIPanel() {
         if (!res.ok) {
           throw new Error(data.error || 'Falha ao buscar análise')
         }
-        if (Array.isArray(data) && data.length > 0) {
-          setAnalysis(data[0])
-        } else {
-          setAnalysis(null)
+        
+        if (Array.isArray(data)) {
+          setAllAnalyses(data)
+          if (data.length > 0) {
+            setAnalysis(data[0])
+          }
         }
       } catch (e: any) {
         setError(e.message || 'Erro desconhecido')
@@ -125,6 +154,177 @@ export default function ApprovedClientAIPanel() {
     }
     if (params?.id) loadData()
   }, [params?.id])
+
+  const columns = [
+    {
+      id: 'pending',
+      title: 'Pendente',
+      status: 'pending',
+      color: 'bg-yellow-50 dark:bg-yellow-950/20',
+      items: allAnalyses.filter(item => item.status === 'pending').sort((a, b) => (a.kanban_order || 0) - (b.kanban_order || 0))
+    },
+    {
+      id: 'analyzing',
+      title: 'Em Análise',
+      status: 'analyzing',
+      color: 'bg-blue-50 dark:bg-blue-950/20',
+      items: allAnalyses.filter(item => item.status === 'analyzing').sort((a, b) => (a.kanban_order || 0) - (b.kanban_order || 0))
+    },
+    {
+      id: 'approved',
+      title: 'Aprovado',
+      status: 'approved',
+      color: 'bg-emerald-50 dark:bg-emerald-950/20',
+      items: allAnalyses.filter(item => item.status === 'approved').sort((a, b) => (a.kanban_order || 0) - (b.kanban_order || 0))
+    },
+    {
+      id: 'rejected',
+      title: 'Rejeitado',
+      status: 'rejected',
+      color: 'bg-red-50 dark:bg-red-950/20',
+      items: allAnalyses.filter(item => item.status === 'rejected').sort((a, b) => (a.kanban_order || 0) - (b.kanban_order || 0))
+    }
+  ]
+
+  const handleDragStart = (event: any) => {
+    setActiveId(event.active.id)
+  }
+
+  const handleDragOver = (event: DragOverEvent) => {
+    const { active, over } = event
+    if (!over) return
+
+    const activeId = active.id as string
+    const overId = over.id as string
+
+    // Encontrar os containers (colunas)
+    const activeItem = allAnalyses.find(i => i.id === activeId)
+    if (!activeItem) return
+
+    // Se estiver sobre uma coluna (pelo ID do status)
+    const isOverColumn = ['pending', 'analyzing', 'approved', 'rejected'].includes(overId)
+    
+    if (isOverColumn) {
+      if (activeItem.status !== overId) {
+        setAllAnalyses(prev => {
+          const newAnalyses = prev.map(item => 
+            item.id === activeId ? { ...item, status: overId as any } : item
+          )
+          return newAnalyses
+        })
+      }
+      return
+    }
+
+    // Se estiver sobre outro card
+    const overItem = allAnalyses.find(i => i.id === overId)
+    if (overItem && activeItem.status !== overItem.status) {
+      setAllAnalyses(prev => {
+        const newAnalyses = prev.map(item => 
+          item.id === activeId ? { ...item, status: overItem.status } : item
+        )
+        return newAnalyses
+      })
+    }
+  }
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event
+    setActiveId(null)
+
+    if (!over) return
+
+    const activeId = active.id as string
+    const overId = over.id as string
+
+    // Encontrar o item que está sendo arrastado
+    const activeItem = allAnalyses.find(i => i.id === activeId)
+    if (!activeItem) return
+
+    // Se mudou de posição ou status
+    if (activeId !== overId) {
+      // 1. Atualizar o estado local imediatamente para uma UI fluida
+      let updatedItems: Analysis[] = []
+      
+      setAllAnalyses((items) => {
+        const oldIndex = items.findIndex((i) => i.id === activeId)
+        const overIndex = items.findIndex((i) => i.id === overId)
+        
+        let newItems = [...items]
+        
+        // Se soltou sobre outro item
+        if (overIndex !== -1) {
+          newItems = arrayMove(items, oldIndex, overIndex)
+          
+          // O status já deve ter sido atualizado no handleDragOver, 
+          // mas garantimos que o item arrastado tenha o mesmo status do item sobre o qual foi solto
+          const overItem = items[overIndex]
+          const movedItemIndex = newItems.findIndex(i => i.id === activeId)
+          if (movedItemIndex !== -1) {
+            newItems[movedItemIndex].status = overItem.status
+          }
+        } else {
+          // Se soltou sobre uma coluna (overId é o status)
+          const isOverColumn = ['pending', 'analyzing', 'approved', 'rejected'].includes(overId)
+          if (isOverColumn) {
+            const movedItemIndex = newItems.findIndex(i => i.id === activeId)
+            if (movedItemIndex !== -1) {
+              newItems[movedItemIndex].status = overId
+            }
+          }
+        }
+
+        // 2. Recalcular kanban_order para TODOS os itens nos status afetados
+        // Para simplificar, recalculamos para todos os status
+        const statuses = ['pending', 'analyzing', 'approved', 'rejected']
+        statuses.forEach(status => {
+          const statusItems = newItems.filter(i => i.status === status)
+          statusItems.forEach((item, index) => {
+            item.kanban_order = index
+          })
+        })
+
+        updatedItems = [...newItems]
+        return updatedItems
+      })
+
+      // 3. Persistir no banco de dados
+      // Vamos persistir todos os itens cujas posições podem ter mudado
+      // Isso garante que a ordem seja mantida para todos os cards
+      try {
+        // Filtramos apenas os itens que estão nos status que poderiam ter sido afetados
+        // Para simplificar e garantir consistência total, enviamos todos os itens reordenados
+        const itemsToUpdate = updatedItems.map(item => ({
+          id: item.id,
+          status: item.status,
+          kanban_order: item.kanban_order
+        }))
+
+        await fetch('/api/ai-analysis/bulk-update', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items: itemsToUpdate })
+        })
+      } catch (error) {
+        console.error('Erro ao salvar reordenamento em massa:', error)
+      }
+    }
+  }
+
+  const handleStatusChange = async (itemId: string, newStatus: string) => {
+    try {
+      await fetch(`/api/ai-analysis/${itemId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus })
+      })
+      setAllAnalyses(prev => prev.map(item => 
+        item.id === itemId ? { ...item, status: newStatus } : item
+      ))
+    } catch (error) {
+      console.error('Erro ao atualizar status:', error)
+    }
+  }
 
   if (loading) {
     return (
@@ -419,6 +619,7 @@ export default function ApprovedClientAIPanel() {
         <div className="sticky top-6 z-30 p-3 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md rounded-[3.5rem] border-[3px] border-slate-900 dark:border-slate-950 shadow-[12px_12px_0px_0px_rgba(0,0,0,1)] dark:shadow-[12px_12px_0px_0px_rgba(255,255,255,1)] inline-flex w-full sm:w-auto overflow-x-auto no-scrollbar">
           <TabsList className="bg-transparent rounded-none p-0 h-auto flex flex-nowrap gap-3 border-none">
             {[
+              { id: 'kanban', label: 'Kanban', icon: Target },
               { id: 'overview', label: 'Visão Geral', icon: Eye },
               { id: 'intelligence', label: 'Inteligência', icon: Brain },
               { id: 'negotiation', label: 'Negociação', icon: Handshake }
@@ -434,6 +635,59 @@ export default function ApprovedClientAIPanel() {
             ))}
           </TabsList>
         </div>
+
+        <TabsContent value="kanban" className="mt-0 animate-in slide-in-from-top-10 duration-700">
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCorners}
+            onDragStart={handleDragStart}
+            onDragOver={handleDragOver}
+            onDragEnd={handleDragEnd}
+          >
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
+              {columns.map((column) => (
+                <div key={column.id} className="space-y-6">
+                  <div className="flex items-center justify-between px-4">
+                    <h3 className="text-xl font-black uppercase tracking-tighter italic text-slate-900 dark:text-white flex items-center gap-3">
+                      <span className={`w-3 h-3 rounded-full ${column.status === 'pending' ? 'bg-yellow-400' : column.status === 'analyzing' ? 'bg-blue-400' : column.status === 'approved' ? 'bg-emerald-400' : 'bg-red-400'}`} />
+                      {column.title}
+                    </h3>
+                    <Badge variant="outline" className="rounded-lg border-2 border-slate-900 dark:border-slate-950 font-black">
+                      {column.items.length}
+                    </Badge>
+                  </div>
+                  <KanbanColumn
+                    column={column}
+                    onStatusChange={handleStatusChange}
+                    onItemClick={(item) => {
+                      setAnalysis(item)
+                      setActiveTab('overview')
+                    }}
+                  />
+                </div>
+              ))}
+            </div>
+
+            <DragOverlay dropAnimation={{
+              sideEffects: defaultDropAnimationSideEffects({
+                styles: {
+                  active: {
+                    opacity: '0.5',
+                  },
+                },
+              }),
+            }}>
+              {activeId ? (
+                <div className="rotate-3 scale-105 transition-transform">
+                  <KanbanCard 
+                    item={allAnalyses.find(i => i.id === activeId)!} 
+                    onItemClick={() => {}} 
+                  />
+                </div>
+              ) : null}
+            </DragOverlay>
+          </DndContext>
+        </TabsContent>
 
         <TabsContent value="overview" className="space-y-12 mt-0 animate-in slide-in-from-bottom-6 duration-700">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">

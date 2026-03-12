@@ -97,19 +97,27 @@ export async function POST(request: NextRequest) {
     try {
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
-        await supabase
-          .from('ai_search_memory')
-          .upsert({
-            user_id: user.id,
-            company_name: clientData.company_name,
-            website_url: mergedFullData.website || null,
-            status: 'interested',
-            metadata: {
-              source: 'registration',
-              industry: mergedFullData.industry || null,
-              city: mergedFullData.city || null
-            }
-          }, { onConflict: 'user_id,company_name' })
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('user_id', user.id)
+          .maybeSingle()
+
+        if (profile) {
+          await supabase
+            .from('ai_search_memory')
+            .upsert({
+              profile_id: profile.id,
+              company_name: clientData.company_name,
+              website_url: mergedFullData.website || null,
+              status: 'interested',
+              metadata: {
+                source: 'registration',
+                industry: mergedFullData.industry || null,
+                city: mergedFullData.city || null
+              }
+            }, { onConflict: 'profile_id,company_name' })
+        }
       }
     } catch (memError) {
       console.warn('Falha ao registrar na memória da IA:', memError)

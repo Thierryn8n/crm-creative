@@ -862,7 +862,7 @@ Retorne SOMENTE JSON:
 }
 
 // Função para gerar estratégia com IA
-async function generateStrategy(companyInfo: any, userProfile: any) {
+async function generateStrategy(companyInfo: any, profile: any) {
   const prompt = `
     Você é um coach de carreira sênior e especialista em recrutamento.
     Gere uma estratégia COMPLETAMENTE PERSONALIZADA para o USUÁRIO conseguir um emprego nesta empresa.
@@ -888,13 +888,13 @@ async function generateStrategy(companyInfo: any, userProfile: any) {
     - Facebook: ${companyInfo.social_media_presence?.facebook ? 'Presente' : 'Não presente'}
     
     PERFIL DO USUÁRIO (CURRÍCULO):
-    - Nome: ${userProfile?.user_name || 'Não disponível'}
-    - LinkedIn: ${userProfile?.linkedin_url || 'Não informado'}
-    - Habilidades: ${userProfile?.skills?.join(', ') || 'Não informado'}
-    - Especialidades: ${userProfile?.specialties?.join(', ') || 'Não informado'}
-    - Experiência (anos): ${userProfile?.experience_years ?? 'Não informado'}
-    - Tipos de trabalho preferidos: ${userProfile?.preferred_work_types?.join(', ') || 'Não informado'}
-    - Currículo (texto): ${userProfile?.resume_text ? userProfile.resume_text.slice(0, 3500) : 'Não fornecido'}
+    - Nome: ${profile?.user_name || 'Não disponível'}
+    - LinkedIn: ${profile?.linkedin_url || 'Não informado'}
+    - Habilidades: ${profile?.skills?.join(', ') || 'Não informado'}
+    - Especialidades: ${profile?.specialties?.join(', ') || 'Não informado'}
+    - Experiência (anos): ${profile?.experience_years ?? 'Não informado'}
+    - Tipos de trabalho preferidos: ${profile?.preferred_work_types?.join(', ') || 'Não informado'}
+    - Currículo (texto): ${profile?.resume_text ? profile.resume_text.slice(0, 3500) : 'Não fornecido'}
     
     Crie uma estratégia de CARREIRA detalhada incluindo:
     
@@ -973,7 +973,7 @@ async function generateNarrativeReport(params: {
   market_analysis?: any,
   ads_analysis?: any,
   strategy?: any,
-  user_profile?: any
+  profile?: any
 }) {
   const {
     company_name,
@@ -983,7 +983,7 @@ async function generateNarrativeReport(params: {
     market_analysis,
     ads_analysis,
     strategy,
-    user_profile
+    profile
   } = params
 
   const prompt = `
@@ -1006,7 +1006,7 @@ Dados de entrada:
 - Mercado: ${market_analysis ? JSON.stringify(market_analysis) : 'n/d'}
 - Anúncios: ${ads_analysis ? JSON.stringify(ads_analysis) : 'n/d'}
 - Estratégia IA: ${strategy ? JSON.stringify(strategy) : 'n/d'}
-- Usuário: ${user_profile ? JSON.stringify(user_profile) : 'n/d'}
+- Usuário: ${profile ? JSON.stringify(profile) : 'n/d'}
 
 Regras:
 - Texto corrido, não retorne listas marcadas como JSON ou arrays.
@@ -1028,12 +1028,27 @@ export async function POST(request: NextRequest) {
     let profileId: string | null = null
     let shouldSetCookie = false
     if (user) {
-      profileId = user.id
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('user_id', user.id)
+        .maybeSingle()
+      if (profile) {
+        profileId = profile.id
+      } else {
+        // Criar perfil se não existir para o usuário logado
+        const { data: newProfile } = await supabase
+          .from('profiles')
+          .insert([{ user_id: user.id, user_name: user.user_metadata?.name || user.user_metadata?.full_name || 'Usuário', email: user.email }])
+          .select('id')
+          .single()
+        if (newProfile) profileId = newProfile.id
+      }
     } else {
       profileId = request.cookies.get(PROFILE_COOKIE)?.value || null
       if (!profileId) {
         const { data: inserted } = await supabase
-          .from('user_profiles')
+          .from('profiles')
           .insert([{ user_name: 'Usuário', email: null }])
           .select('id')
           .single()
@@ -1055,14 +1070,14 @@ export async function POST(request: NextRequest) {
     }
     
     // Buscar perfil do usuário (por id do cookie ou id do auth)
-    let userProfile: any = null
+    let profileData: any = null
     if (profileId) {
-      const { data: up } = await supabase
-        .from('user_profiles')
+      const { data: profile } = await supabase
+        .from('profiles')
         .select('*')
         .eq('id', profileId)
         .maybeSingle()
-      userProfile = up
+      profileData = profile
     }
     
     let effectiveWebsite = website_url || null
@@ -1159,7 +1174,7 @@ export async function POST(request: NextRequest) {
       ads_analysis: adsAnalysis,
       market_analysis: marketAnalysis,
       technologies: websiteAnalysis.technologies || []
-    }, userProfile)
+    }, profileData)
     
     // Texto completo narrativo
     const narrativeText = await generateNarrativeReport({
@@ -1170,11 +1185,12 @@ export async function POST(request: NextRequest) {
       market_analysis: marketAnalysis,
       ads_analysis: adsAnalysis,
       strategy,
-      user_profile: userProfile
+      profile: profileData
     })
     
     // Preparar dados para salvar
     const analysisData = {
+      profile_id: profileId,
       company_name,
       website_url: effectiveWebsite,
       linkedin_url: effectiveLinkedin,
@@ -1232,7 +1248,7 @@ export async function POST(request: NextRequest) {
       const matchAnalysis = calculateMatchScore(userProfile, resultAnalysis)
       
       await supabase.from('user_skills_matches').upsert({
-        user_profile_id: userProfile.id,
+        profile_id: userProfile.id,
         company_analysis_id: resultAnalysis.id,
         match_score: matchAnalysis.score,
         matching_skills: matchAnalysis.recommended_skills || [],

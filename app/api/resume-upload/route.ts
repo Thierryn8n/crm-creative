@@ -15,6 +15,20 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Buscar profile_id do usuário
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle()
+
+    if (!profile) {
+      return NextResponse.json(
+        { error: 'Perfil não encontrado' },
+        { status: 404 }
+      )
+    }
+
     const formData = await request.formData()
     const file = formData.get('file') as File
     const type = formData.get('type') as string // 'resume', 'linkedin', 'portfolio'
@@ -103,7 +117,7 @@ export async function POST(request: NextRequest) {
       const { data: portfolioData, error: portfolioError } = await supabase
         .from('portfolio_items')
         .insert({
-          user_id: user.id,
+          profile_id: profile.id,
           title: portfolioTitle,
           description: portfolioDescription,
           category: portfolioCategory,
@@ -129,7 +143,7 @@ export async function POST(request: NextRequest) {
       const { data: resumeData, error: dbError } = await supabase
         .from('user_resumes')
         .upsert({
-          user_id: user.id,
+          profile_id: profile.id,
           type: type,
           content: content,
           file_url: fileUrl,
@@ -141,7 +155,7 @@ export async function POST(request: NextRequest) {
           confidence_score: analysis.confidence_score,
           analysis: analysis.full_analysis
         }, {
-          onConflict: 'user_id,type'
+          onConflict: 'profile_id,type'
         })
         .select()
         .single()
@@ -173,9 +187,9 @@ export async function POST(request: NextRequest) {
       }
 
       const { error: profileError } = await supabase
-        .from('user_profiles')
+        .from('profiles')
         .update(updateData)
-        .eq('id', user.id)
+        .eq('id', profile.id)
 
       if (profileError) {
         console.error('Erro ao atualizar perfil:', profileError)

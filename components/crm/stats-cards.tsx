@@ -69,19 +69,19 @@ export function StatsCards({ stats }: StatsCardsProps) {
   ]
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
       {cards.map((card) => (
-        <Card key={card.title} className="border-[3px] border-slate-900 dark:border-slate-950 rounded-[2rem] overflow-hidden bg-white dark:bg-slate-900 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_0px_rgba(255,255,255,1)] transition-all hover:translate-x-1 hover:-translate-y-1 group">
-          <CardHeader className="flex flex-row items-center justify-between pb-2 p-6">
-            <CardTitle className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">
+        <Card key={card.title} className="border-[3px] border-slate-900 dark:border-slate-950 rounded-2xl overflow-hidden bg-white dark:bg-slate-900 shadow-[5px_5px_0px_0px_rgba(0,0,0,1)] dark:shadow-[5px_5px_0px_0px_rgba(255,255,255,1)] transition-all">
+          <CardHeader className="flex flex-row items-center justify-between pb-1 p-4">
+            <CardTitle className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">
               {card.title}
             </CardTitle>
-            <div className={`p-3 rounded-xl ${card.bgColor} border-2 border-slate-900 dark:border-slate-950 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_0px_rgba(255,255,255,1)] group-hover:rotate-6 transition-transform`}>
-              <card.icon className={`h-5 w-5 ${card.color}`} />
+            <div className={`p-2 rounded-lg ${card.bgColor} border-2 border-slate-900 dark:border-slate-950 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_0px_rgba(255,255,255,1)]`}>
+              <card.icon className={`h-4 w-4 ${card.color}`} />
             </div>
           </CardHeader>
-          <CardContent className="px-6 pb-6">
-            <div className="text-4xl font-black text-slate-900 dark:text-white tracking-tighter uppercase italic">{card.value}</div>
+          <CardContent className="px-4 pb-4">
+            <div className="text-3xl font-black text-slate-900 dark:text-white tracking-tighter uppercase italic">{card.value}</div>
           </CardContent>
         </Card>
       ))}

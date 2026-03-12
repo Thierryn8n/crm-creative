@@ -30,12 +30,25 @@ export async function POST(request: NextRequest) {
       }, { status: 400 })
     }
 
+    // Buscar o profile_id real do usuário logado
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle()
+
+    if (!profile) {
+      return NextResponse.json({ error: 'Perfil não encontrado' }, { status: 404 })
+    }
+
+    const profileId = profile.id
+
     // Verificar se a análise pertence ao usuário
     const { data: analysis } = await supabase
       .from('company_analysis')
       .select('id')
       .eq('id', analysis_id)
-      .eq('user_profile_id', user.id)
+      .eq('profile_id', profileId)
       .single()
 
     if (!analysis) {
@@ -51,7 +64,7 @@ export async function POST(request: NextRequest) {
         data_snapshot,
         user_notes,
         approval_notes,
-        user_id: user.id,
+        profile_id: profileId,
         created_at: new Date().toISOString()
       }])
       .select()
@@ -99,12 +112,25 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'analysis_id é obrigatório' }, { status: 400 })
     }
 
+    // Buscar o profile_id real do usuário logado
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle()
+
+    if (!profile) {
+      return NextResponse.json({ error: 'Perfil não encontrado' }, { status: 404 })
+    }
+
+    const profileId = profile.id
+
     // Buscar versões da análise
     const { data: versions, error } = await supabase
       .from('ai_analysis_versions')
       .select('*')
       .eq('analysis_id', analysisId)
-      .eq('user_id', user.id)
+      .eq('profile_id', profileId)
       .order('created_at', { ascending: false })
 
     if (error) {

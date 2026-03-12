@@ -7,44 +7,165 @@ export async function POST() {
     const supabase = await createClient()
     const adminSupabase = createAdminClient()
     
-    // Create user_profiles table
+    // Centralize Profiles
     try {
       await adminSupabase.rpc('exec_sql', {
         sql: `
-          CREATE TABLE IF NOT EXISTS public.user_profiles (
-            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            user_id UUID,
-            user_name VARCHAR(255),
-            email VARCHAR(255),
-            linkedin_url TEXT,
-            resume_text TEXT,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          -- 1. Rename user_profiles to profiles if it exists
+          DO $$ 
+          BEGIN
+              IF EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'user_profiles') THEN
+                  ALTER TABLE public.user_profiles RENAME TO profiles;
+              END IF;
+          END $$;
+
+          -- 2. Ensure profiles table has the correct structure
+          CREATE TABLE IF NOT EXISTS public.profiles (
+              id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+              user_id UUID UNIQUE REFERENCES auth.users(id) ON DELETE CASCADE,
+              user_name VARCHAR(255),
+              email VARCHAR(255),
+              phone VARCHAR(50),
+              linkedin_url TEXT,
+              indeed_url TEXT,
+              portfolio_url TEXT,
+              github_url TEXT,
+              behance_url TEXT,
+              resume_text TEXT,
+              skills TEXT[] DEFAULT '{}',
+              experience_years INT DEFAULT 0,
+              specialties TEXT[] DEFAULT '{}',
+              preferred_work_types TEXT[] DEFAULT '{}',
+              hourly_rate NUMERIC(10,2),
+              daily_rate NUMERIC(10,2),
+              availability VARCHAR(50) DEFAULT 'available',
+              bio TEXT,
+              profile_photo_url TEXT,
+              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+              updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
           );
 
-          -- Enable RLS
-          ALTER TABLE public.user_profiles ENABLE ROW LEVEL SECURITY;
+          -- 3. Add profile_id column to all other tables
+          DO $$
+          DECLARE
+              t TEXT;
+              tables_to_link TEXT[] := ARRAY[
+                  'user_resumes', 
+                  'clients', 
+                  'interactions', 
+                  'email_templates', 
+                  'sent_emails', 
+                  'portfolio_cache', 
+                  'ai_searches', 
+                  'potential_clients', 
+                  'client_labels', 
+                  'portfolio_items', 
+                  'approved_companies', 
+                  'negotiation_history', 
+                  'ai_insights', 
+                  'ai_search_memory', 
+                  'kanban_boards', 
+                  'kanban_columns', 
+                  'kanban_cards',
+                  'company_analysis',
+                  'user_skills_matches',
+                  'ai_analysis_versions',
+                  'negotiations'
+              ];
+          BEGIN
+              FOREACH t IN ARRAY tables_to_link LOOP
+                  IF EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = t) THEN
+                      -- Add profile_id if it doesn't exist
+                      IF NOT EXISTS (SELECT FROM information_schema.columns WHERE table_schema = 'public' AND table_name = t AND column_name = 'profile_id') THEN
+                          EXECUTE format('ALTER TABLE public.%I ADD COLUMN profile_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE', t);
+                      END IF;
+                  END IF;
+              END LOOP;
 
-          -- Policies for user_profiles
+              -- Add kanban_order to company_analysis if it doesn't exist
+              IF EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'company_analysis') THEN
+                  IF NOT EXISTS (SELECT FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'company_analysis' AND column_name = 'kanban_order') THEN
+                      ALTER TABLE public.company_analysis ADD COLUMN kanban_order INTEGER DEFAULT 0;
+                  END IF;
+              END IF;
+          END $$;
+
+          -- 4. Enable RLS and create policies for profiles
+          ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+
           DO $$
           BEGIN
-            IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'user_profiles' AND policyname = 'Public access to profiles') THEN
-              CREATE POLICY "Public access to profiles" ON public.user_profiles
-                FOR ALL USING (true) WITH CHECK (true);
-            END IF;
+              IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'profiles' AND policyname = 'Users can manage their own profile') THEN
+                  CREATE POLICY "Users can manage their own profile" ON public.profiles
+                      FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+              END IF;
+          END $$;
+
+          -- 5. Enable RLS and create policies for all linked tables
+          DO $$
+          DECLARE
+              t TEXT;
+              policy_exists BOOLEAN;
+              tables_to_link TEXT[] := ARRAY[
+                  'user_resumes', 
+                  'clients', 
+                  'interactions', 
+                  'email_templates', 
+                  'sent_emails', 
+                  'portfolio_cache', 
+                  'ai_searches', 
+                  'potential_clients', 
+                  'client_labels', 
+                  'portfolio_items', 
+                  'approved_companies', 
+                  'negotiation_history', 
+                  'ai_insights', 
+                  'ai_search_memory', 
+                  'kanban_boards', 
+                  'kanban_columns', 
+                  'kanban_cards',
+                  'company_analysis',
+                  'user_skills_matches',
+                  'ai_analysis_versions',
+                  'negotiations'
+              ];
+          BEGIN
+              FOREACH t IN ARRAY tables_to_link LOOP
+                  IF EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = t) THEN
+                      -- Enable RLS
+                      EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', t);
+                      
+                      -- Drop existing permissive policy if it exists
+                      EXECUTE format('DROP POLICY IF EXISTS "Enable all access for all users" ON public.%I', t);
+                      
+                      -- Check if our custom policy already exists
+                      SELECT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = t AND policyname = 'Users can manage their own data') INTO policy_exists;
+                      
+                      IF NOT policy_exists THEN
+                          EXECUTE format('
+                              CREATE POLICY "Users can manage their own data" ON public.%I
+                              FOR ALL USING (
+                                  profile_id IN (SELECT id FROM public.profiles WHERE user_id = auth.uid())
+                              ) WITH CHECK (
+                                  profile_id IN (SELECT id FROM public.profiles WHERE user_id = auth.uid())
+                              )', t);
+                      END IF;
+                  END IF;
+              END LOOP;
           END $$;
         `
       })
     } catch (e) {
-      console.error('Error creating user_profiles:', e)
+      console.error('Error centralizing profiles:', e)
     }
 
     // Create clients table
     try {
-      await supabase.rpc('exec_sql', {
+      await adminSupabase.rpc('exec_sql', {
         sql: `
           CREATE TABLE IF NOT EXISTS public.clients (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            profile_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
             company_name VARCHAR(255) NOT NULL,
             status VARCHAR(50) DEFAULT 'lead',
             priority VARCHAR(20) DEFAULT 'medium',
@@ -61,6 +182,9 @@ export async function POST() {
           -- Ensure columns exist if table already exists
           DO $$
           BEGIN
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'clients' AND column_name = 'profile_id') THEN
+              ALTER TABLE public.clients ADD COLUMN profile_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE;
+            END IF;
             IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'clients' AND column_name = 'website_url') THEN
               ALTER TABLE public.clients ADD COLUMN website_url TEXT;
             END IF;
@@ -77,6 +201,9 @@ export async function POST() {
               ALTER TABLE public.clients ADD COLUMN twitter_url TEXT;
             END IF;
           END $$;
+
+          -- Enable RLS
+          ALTER TABLE public.clients ENABLE ROW LEVEL SECURITY;
         `
       })
     } catch {
@@ -85,10 +212,11 @@ export async function POST() {
 
     // Create interactions table
     try {
-      await supabase.rpc('exec_sql', {
+      await adminSupabase.rpc('exec_sql', {
         sql: `
           CREATE TABLE IF NOT EXISTS public.interactions (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            profile_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
             client_id UUID NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
             type VARCHAR(50) NOT NULL,
             subject VARCHAR(255),
@@ -96,16 +224,27 @@ export async function POST() {
             direction VARCHAR(20) DEFAULT 'outbound',
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
           );
+
+          -- Ensure profile_id exists
+          DO $$
+          BEGIN
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'interactions' AND column_name = 'profile_id') THEN
+              ALTER TABLE public.interactions ADD COLUMN profile_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE;
+            END IF;
+          END $$;
+
+          ALTER TABLE public.interactions ENABLE ROW LEVEL SECURITY;
         `
       })
     } catch {}
 
     // Create email_templates table
     try {
-      await supabase.rpc('exec_sql', {
+      await adminSupabase.rpc('exec_sql', {
         sql: `
           CREATE TABLE IF NOT EXISTS public.email_templates (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            profile_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
             name VARCHAR(255) NOT NULL,
             subject VARCHAR(255) NOT NULL,
             body TEXT NOT NULL,
@@ -113,16 +252,27 @@ export async function POST() {
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
           );
+
+          -- Ensure profile_id exists
+          DO $$
+          BEGIN
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'email_templates' AND column_name = 'profile_id') THEN
+              ALTER TABLE public.email_templates ADD COLUMN profile_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE;
+            END IF;
+          END $$;
+
+          ALTER TABLE public.email_templates ENABLE ROW LEVEL SECURITY;
         `
       })
     } catch {}
 
     // Create sent_emails table
     try {
-      await supabase.rpc('exec_sql', {
+      await adminSupabase.rpc('exec_sql', {
         sql: `
           CREATE TABLE IF NOT EXISTS public.sent_emails (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            profile_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
             client_id UUID NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
             template_id UUID REFERENCES public.email_templates(id),
             to_email VARCHAR(255) NOT NULL,
@@ -131,16 +281,27 @@ export async function POST() {
             status VARCHAR(50) DEFAULT 'sent',
             sent_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
           );
+
+          -- Ensure profile_id exists
+          DO $$
+          BEGIN
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sent_emails' AND column_name = 'profile_id') THEN
+              ALTER TABLE public.sent_emails ADD COLUMN profile_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE;
+            END IF;
+          END $$;
+
+          ALTER TABLE public.sent_emails ENABLE ROW LEVEL SECURITY;
         `
       })
     } catch {}
 
     // Create portfolio_cache table
     try {
-      await supabase.rpc('exec_sql', {
+      await adminSupabase.rpc('exec_sql', {
         sql: `
           CREATE TABLE IF NOT EXISTS public.portfolio_cache (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            profile_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
             external_id VARCHAR(255),
             title VARCHAR(255) NOT NULL,
             description TEXT,
@@ -150,32 +311,54 @@ export async function POST() {
             source_table VARCHAR(100),
             synced_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
           );
+
+          -- Ensure profile_id exists
+          DO $$
+          BEGIN
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'portfolio_cache' AND column_name = 'profile_id') THEN
+              ALTER TABLE public.portfolio_cache ADD COLUMN profile_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE;
+            END IF;
+          END $$;
+
+          ALTER TABLE public.portfolio_cache ENABLE ROW LEVEL SECURITY;
         `
       })
     } catch {}
 
     // Create ai_searches table
     try {
-      await supabase.rpc('exec_sql', {
+      await adminSupabase.rpc('exec_sql', {
         sql: `
           CREATE TABLE IF NOT EXISTS public.ai_searches (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            profile_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
             query TEXT NOT NULL,
             results JSONB,
             clients_added INTEGER DEFAULT 0,
             result_count INTEGER DEFAULT 5,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
           );
+
+          -- Ensure profile_id exists
+          DO $$
+          BEGIN
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'ai_searches' AND column_name = 'profile_id') THEN
+              ALTER TABLE public.ai_searches ADD COLUMN profile_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE;
+            END IF;
+          END $$;
+
+          ALTER TABLE public.ai_searches ENABLE ROW LEVEL SECURITY;
         `
       })
     } catch {}
 
     // Create potential_clients table (leads before approval)
     try {
-      await supabase.rpc('exec_sql', {
+      await adminSupabase.rpc('exec_sql', {
         sql: `
           CREATE TABLE IF NOT EXISTS public.potential_clients (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            profile_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
             company_name VARCHAR(255) NOT NULL,
             contact_name VARCHAR(255),
             email VARCHAR(255),
@@ -193,23 +376,44 @@ export async function POST() {
             rejection_reason TEXT,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(company_name, email)
+            UNIQUE(profile_id, company_name, email)
           );
+
+          -- Ensure profile_id exists and unique constraint is updated
+          DO $$
+          BEGIN
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'potential_clients' AND column_name = 'profile_id') THEN
+              ALTER TABLE public.potential_clients ADD COLUMN profile_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE;
+            END IF;
+          END $$;
+
+          ALTER TABLE public.potential_clients ENABLE ROW LEVEL SECURITY;
         `
       })
     } catch {}
 
     // Create client_labels table (for custom labels)
     try {
-      await supabase.rpc('exec_sql', {
+      await adminSupabase.rpc('exec_sql', {
         sql: `
           CREATE TABLE IF NOT EXISTS public.client_labels (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            profile_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
             name VARCHAR(100) NOT NULL,
             color VARCHAR(7) DEFAULT '#6B7280',
             is_system BOOLEAN DEFAULT false,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
           );
+
+          -- Ensure profile_id exists
+          DO $$
+          BEGIN
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'client_labels' AND column_name = 'profile_id') THEN
+              ALTER TABLE public.client_labels ADD COLUMN profile_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE;
+            END IF;
+          END $$;
+
+          ALTER TABLE public.client_labels ENABLE ROW LEVEL SECURITY;
         `
       })
     } catch {}
@@ -220,7 +424,7 @@ export async function POST() {
         sql: `
           CREATE TABLE IF NOT EXISTS public.portfolio_items (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            user_id UUID,
+            profile_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
             title VARCHAR(255) NOT NULL,
             description TEXT,
             type VARCHAR(50),
@@ -235,15 +439,6 @@ export async function POST() {
 
           -- Enable RLS
           ALTER TABLE public.portfolio_items ENABLE ROW LEVEL SECURITY;
-
-          -- Policies for portfolio_items
-          DO $$
-          BEGIN
-            IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'portfolio_items' AND policyname = 'Public access to portfolio_items') THEN
-              CREATE POLICY "Public access to portfolio_items" ON public.portfolio_items
-                FOR ALL USING (true) WITH CHECK (true);
-            END IF;
-          END $$;
         `
       })
     } catch (e) {
@@ -256,26 +451,17 @@ export async function POST() {
         sql: `
           CREATE TABLE IF NOT EXISTS public.user_resumes (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            user_id UUID NOT NULL,
+            profile_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
             type VARCHAR(50) DEFAULT 'resume',
             content TEXT,
             file_url TEXT,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(user_id, type)
+            UNIQUE(profile_id, type)
           );
 
           -- Enable RLS
           ALTER TABLE public.user_resumes ENABLE ROW LEVEL SECURITY;
-
-          -- Policies for user_resumes
-          DO $$
-          BEGIN
-            IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'user_resumes' AND policyname = 'Users can manage their own resumes') THEN
-              CREATE POLICY "Users can manage their own resumes" ON public.user_resumes
-                FOR ALL USING (true) WITH CHECK (true); -- Simplified for now to ensure it works
-            END IF;
-          END $$;
         `
       })
     } catch (e) {
@@ -288,7 +474,7 @@ export async function POST() {
         sql: `
           CREATE TABLE IF NOT EXISTS public.approved_companies (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            user_id UUID NOT NULL,
+            profile_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
             company_id UUID REFERENCES public.clients(id),
             company_name VARCHAR(255) NOT NULL,
             website_url TEXT,
@@ -310,7 +496,7 @@ export async function POST() {
             first_contact_date TIMESTAMP WITH TIME ZONE,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(user_id, company_id)
+            UNIQUE(profile_id, company_id)
           );
           
           -- Ensure columns exist if table already exists
@@ -334,14 +520,6 @@ export async function POST() {
           END $$;
           
           ALTER TABLE public.approved_companies ENABLE ROW LEVEL SECURITY;
-          
-          DO $$
-          BEGIN
-            IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'approved_companies' AND policyname = 'Users can manage their own approved companies') THEN
-              CREATE POLICY "Users can manage their own approved companies" ON public.approved_companies
-                FOR ALL USING (true) WITH CHECK (true);
-            END IF;
-          END $$;
         `
       })
     } catch (e) {
@@ -355,7 +533,7 @@ export async function POST() {
           CREATE TABLE IF NOT EXISTS public.negotiation_history (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             approved_company_id UUID REFERENCES public.approved_companies(id) ON DELETE CASCADE,
-            user_id UUID NOT NULL,
+            profile_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
             action_type VARCHAR(50) NOT NULL,
             description TEXT NOT NULL,
             outcome VARCHAR(50),
@@ -370,14 +548,6 @@ export async function POST() {
           );
           
           ALTER TABLE public.negotiation_history ENABLE ROW LEVEL SECURITY;
-          
-          DO $$
-          BEGIN
-            IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'negotiation_history' AND policyname = 'Users can manage their own negotiation history') THEN
-              CREATE POLICY "Users can manage their own negotiation history" ON public.negotiation_history
-                FOR ALL USING (true) WITH CHECK (true);
-            END IF;
-          END $$;
         `
       })
     } catch (e) {
@@ -391,7 +561,7 @@ export async function POST() {
           CREATE TABLE IF NOT EXISTS public.ai_insights (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             approved_company_id UUID REFERENCES public.approved_companies(id) ON DELETE CASCADE,
-            user_id UUID NOT NULL,
+            profile_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
             insight_type VARCHAR(50) NOT NULL,
             title VARCHAR(255) NOT NULL,
             content TEXT NOT NULL,
@@ -401,14 +571,6 @@ export async function POST() {
           );
           
           ALTER TABLE public.ai_insights ENABLE ROW LEVEL SECURITY;
-          
-          DO $$
-          BEGIN
-            IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'ai_insights' AND policyname = 'Users can manage their own ai insights') THEN
-              CREATE POLICY "Users can manage their own ai insights" ON public.ai_insights
-                FOR ALL USING (true) WITH CHECK (true);
-            END IF;
-          END $$;
         `
       })
     } catch (e) {
@@ -417,11 +579,11 @@ export async function POST() {
 
     // Create ai_search_memory table (referenced in approved-companies/route.ts)
     try {
-        await supabase.rpc('exec_sql', {
+        await adminSupabase.rpc('exec_sql', {
           sql: `
             CREATE TABLE IF NOT EXISTS public.ai_search_memory (
               id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-              user_id UUID NOT NULL,
+              profile_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
               company_name VARCHAR(255) NOT NULL,
               status VARCHAR(50) DEFAULT 'discovered',
               feedback_notes TEXT,
@@ -430,44 +592,205 @@ export async function POST() {
             );
             
             ALTER TABLE public.ai_search_memory ENABLE ROW LEVEL SECURITY;
-            
-            DO $$
-            BEGIN
-              IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'ai_search_memory' AND policyname = 'Users can manage their own ai search memory') THEN
-                CREATE POLICY "Users can manage their own ai search memory" ON public.ai_search_memory
-                  FOR ALL USING (true) WITH CHECK (true);
-              END IF;
-            END $$;
           `
         })
       } catch (e) {
         console.error('Error creating ai_search_memory:', e)
       }
 
-
-    // Ensure portfolio_items has user_id and correct policies
+    // Create company_analysis table
     try {
-      await supabase.rpc('exec_sql', {
+      await adminSupabase.rpc('exec_sql', {
         sql: `
-          -- Add user_id to portfolio_items if it doesn't exist
+          CREATE TABLE IF NOT EXISTS public.company_analysis (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            profile_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
+            company_name VARCHAR(255) NOT NULL,
+            website_url TEXT,
+            status VARCHAR(50) DEFAULT 'pending',
+            analysis_status VARCHAR(50) DEFAULT 'pending',
+            kanban_order INTEGER DEFAULT 0,
+            website_analysis JSONB DEFAULT '{}'::jsonb,
+            social_media_presence JSONB DEFAULT '{}'::jsonb,
+            ads_analysis JSONB DEFAULT '{}'::jsonb,
+            market_analysis JSONB DEFAULT '{}'::jsonb,
+            ai_strategy JSONB DEFAULT '{}'::jsonb,
+            match_score INTEGER DEFAULT 0,
+            related_client_id UUID REFERENCES public.clients(id) ON DELETE SET NULL,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(profile_id, company_name)
+          );
+
+          -- Ensure columns exist
           DO $$
           BEGIN
-            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'portfolio_items' AND column_name = 'user_id') THEN
-              ALTER TABLE public.portfolio_items ADD COLUMN user_id UUID;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'company_analysis' AND column_name = 'profile_id') THEN
+              ALTER TABLE public.company_analysis ADD COLUMN profile_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'company_analysis' AND column_name = 'kanban_order') THEN
+              ALTER TABLE public.company_analysis ADD COLUMN kanban_order INTEGER DEFAULT 0;
+            END IF;
+          END $$;
+
+          ALTER TABLE public.company_analysis ENABLE ROW LEVEL SECURITY;
+        `
+      })
+    } catch (e) {
+      console.error('Error creating company_analysis:', e)
+    }
+
+    // Create kanban_boards table
+    try {
+      await adminSupabase.rpc('exec_sql', {
+        sql: `
+          CREATE TABLE IF NOT EXISTS public.kanban_boards (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            profile_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
+            name VARCHAR(255) NOT NULL,
+            description TEXT,
+            board_type VARCHAR(50) DEFAULT 'sales',
+            is_active BOOLEAN DEFAULT true,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(profile_id, name)
+          );
+
+          ALTER TABLE public.kanban_boards ENABLE ROW LEVEL SECURITY;
+        `
+      })
+    } catch (e) {
+      console.error('Error creating kanban_boards:', e)
+    }
+
+    // Create kanban_columns table
+    try {
+      await adminSupabase.rpc('exec_sql', {
+        sql: `
+          CREATE TABLE IF NOT EXISTS public.kanban_columns (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            profile_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
+            board_id UUID REFERENCES public.kanban_boards(id) ON DELETE CASCADE,
+            title VARCHAR(255) NOT NULL,
+            description TEXT,
+            position INTEGER NOT NULL,
+            color VARCHAR(50) DEFAULT '#e5e7eb',
+            is_active BOOLEAN DEFAULT true,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(board_id, title)
+          );
+
+          ALTER TABLE public.kanban_columns ENABLE ROW LEVEL SECURITY;
+        `
+      })
+    } catch (e) {
+      console.error('Error creating kanban_columns:', e)
+    }
+
+    // Create kanban_cards table
+    try {
+      await adminSupabase.rpc('exec_sql', {
+        sql: `
+          CREATE TABLE IF NOT EXISTS public.kanban_cards (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            profile_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
+            column_id UUID REFERENCES public.kanban_columns(id) ON DELETE CASCADE,
+            approved_company_id UUID REFERENCES public.approved_companies(id) ON DELETE CASCADE,
+            title VARCHAR(255) NOT NULL,
+            description TEXT,
+            priority VARCHAR(50) DEFAULT 'medium',
+            due_date DATE,
+            position INTEGER NOT NULL DEFAULT 0,
+            is_active BOOLEAN DEFAULT true,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          );
+
+          ALTER TABLE public.kanban_cards ENABLE ROW LEVEL SECURITY;
+        `
+      })
+    } catch (e) {
+      console.error('Error creating kanban_cards:', e)
+    }
+
+    // Create negotiations table
+    try {
+      await adminSupabase.rpc('exec_sql', {
+        sql: `
+          CREATE TABLE IF NOT EXISTS public.negotiations (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            profile_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
+            approved_company_id UUID REFERENCES public.approved_companies(id) ON DELETE CASCADE,
+            status VARCHAR(50) DEFAULT 'iniciado',
+            value DECIMAL(12,2),
+            expected_close_date DATE,
+            notes TEXT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          );
+
+          ALTER TABLE public.negotiations ENABLE ROW LEVEL SECURITY;
+        `
+      })
+    } catch (e) {
+      console.error('Error creating negotiations:', e)
+    }
+
+    // Create user_skills_matches table
+    try {
+      await adminSupabase.rpc('exec_sql', {
+        sql: `
+          CREATE TABLE IF NOT EXISTS public.user_skills_matches (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            profile_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
+            company_analysis_id UUID REFERENCES public.company_analysis(id) ON DELETE CASCADE,
+            match_score INTEGER,
+            skills_found TEXT[],
+            skills_missing TEXT[],
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          );
+
+          ALTER TABLE public.user_skills_matches ENABLE ROW LEVEL SECURITY;
+        `
+      })
+    } catch (e) {
+      console.error('Error creating user_skills_matches:', e)
+    }
+
+    // Create ai_analysis_versions table
+    try {
+      await adminSupabase.rpc('exec_sql', {
+        sql: `
+          CREATE TABLE IF NOT EXISTS public.ai_analysis_versions (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            profile_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
+            company_analysis_id UUID REFERENCES public.company_analysis(id) ON DELETE CASCADE,
+            version_number INTEGER NOT NULL,
+            analysis_data JSONB NOT NULL,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          );
+
+          ALTER TABLE public.ai_analysis_versions ENABLE ROW LEVEL SECURITY;
+        `
+      })
+    } catch (e) {
+      console.error('Error creating ai_analysis_versions:', e)
+    }
+
+    // Ensure portfolio_items has profile_id and correct policies
+    try {
+      await adminSupabase.rpc('exec_sql', {
+        sql: `
+          -- Add profile_id to portfolio_items if it doesn't exist
+          DO $$
+          BEGIN
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'portfolio_items' AND column_name = 'profile_id') THEN
+              ALTER TABLE public.portfolio_items ADD COLUMN profile_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE;
             END IF;
           END $$;
 
           -- Enable RLS
           ALTER TABLE public.portfolio_items ENABLE ROW LEVEL SECURITY;
-
-          -- Policies for portfolio_items
-          DO $$
-          BEGIN
-            IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'portfolio_items' AND policyname = 'Users can manage their own portfolio items') THEN
-              CREATE POLICY "Users can manage their own portfolio items" ON public.portfolio_items
-                FOR ALL USING (true) WITH CHECK (true); -- Simplified for now
-            END IF;
-          END $$;
         `
       })
     } catch (e) {

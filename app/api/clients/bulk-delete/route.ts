@@ -106,12 +106,22 @@ export async function POST(request: NextRequest) {
     try {
       const { data: { user } } = await supabase.auth.getUser()
       if (user && companies && companies.length > 0) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('user_id', user.id)
+          .maybeSingle()
+
+        if (!profile) {
+          throw new Error('Perfil não encontrado para o usuário autenticado')
+        }
+
         const companyNames = companies.map(c => c.company_name).filter(Boolean)
         if (companyNames.length > 0) {
           await supabase
             .from('ai_search_memory')
             .delete()
-            .eq('user_id', user.id)
+            .eq('profile_id', profile.id)
             .in('company_name', companyNames)
         }
       }
