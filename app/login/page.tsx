@@ -56,23 +56,23 @@ export default function LoginPage() {
   const features = [
     {
       icon: <Sparkles className="w-5 h-5 text-amber-500" />,
-      title: "IA Generativa",
-      description: "Análise profunda de leads e automação de propostas com inteligência artificial."
+      title: "Prospecção B2B",
+      description: "Encontre as empresas certas e use IA para criar abordagens de design que convertem."
     },
     {
       icon: <BarChart3 className="w-5 h-5 text-blue-500" />,
-      title: "Gestão Visual",
-      description: "Kanban inteligente e dashboards neo-brutalistas para controle total das vendas."
+      title: "Pipeline de Vendas",
+      description: "Visualize o progresso de cada proposta, desde o primeiro contato até o contrato assinado."
     },
     {
       icon: <Users className="w-5 h-5 text-rose-500" />,
-      title: "CRM Colaborativo",
-      description: "Centralize toda a comunicação e histórico dos seus clientes em um só lugar."
+      title: "Foco em Agências",
+      description: "Gerencie múltiplos leads corporativos com histórico completo e inteligência de mercado."
     },
     {
       icon: <Zap className="w-5 h-5 text-emerald-500" />,
-      title: "Alta Performance",
-      description: "Interface ultra-rápida focada em produtividade e fechamento de negócios."
+      title: "Fechamento Rápido",
+      description: "Reduza o ciclo de vendas de serviços criativos com automação e dados precisos."
     }
   ]
 
@@ -96,11 +96,11 @@ export default function LoginPage() {
             transition={{ duration: 0.5 }}
           >
             <h1 className="text-5xl lg:text-6xl font-black text-slate-900 dark:text-white leading-[1.1] mb-6 tracking-tighter">
-              Transforme sua <br />
-              <span className="text-primary underline decoration-8 decoration-primary/30 underline-offset-4">Gestão Comercial</span>
+              Conquiste Grandes <br />
+              <span className="text-primary underline decoration-8 decoration-primary/30 underline-offset-4">Clientes B2B</span>
             </h1>
             <p className="text-xl text-slate-600 dark:text-slate-400 font-medium max-w-lg leading-relaxed mb-12">
-              A ferramenta definitiva para agências e criativos que buscam escala através de inteligência artificial e design de alto impacto.
+              A plataforma definitiva para designers que desejam vender serviços criativos para empresas com inteligência e escala.
             </p>
           </motion.div>
 
