@@ -196,5 +196,4 @@ export function AIAnalysisCard({ data, onStatusChange, onEdit }: AIAnalysisCardP
       </CardContent>
     </Card>
   )
-  )
 }
