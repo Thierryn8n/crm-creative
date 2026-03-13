@@ -7,12 +7,15 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Brain, Save, Handshake, ArrowLeft, Eye, TrendingUp, Target, Shield, Zap, Globe, BarChart3, Users, Star, ChevronDown, ChevronUp, Mail, Phone, MessageSquare, ExternalLink, Sparkles } from 'lucide-react'
 import { AIIntelligencePanel } from '@/components/crm/ai-intelligence-panel'
 import { AISaveManager } from '@/components/crm/ai-save-manager'
 import { NegotiationForm } from '@/components/crm/negotiation-form'
 import { KanbanColumn } from '@/components/crm/kanban-column'
 import { KanbanCard } from '@/components/crm/kanban-card'
+import { AddCardModal } from '@/components/crm/add-card-modal'
+import { AddColumnButton } from '@/components/crm/add-column-button'
 import { 
   DndContext, 
   DragOverlay, 
@@ -101,10 +104,22 @@ export default function ApprovedClientAIPanel() {
   const router = useRouter()
   const [analysis, setAnalysis] = useState<Analysis | null>(null)
   const [allAnalyses, setAllAnalyses] = useState<Analysis[]>([])
+  const [columns, setColumns] = useState([
+    {
+      id: 'pending',
+      title: 'Pendente',
+      status: 'pending',
+      color: 'bg-yellow-50 dark:bg-yellow-950/20',
+      items: []
+    }
+  ])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState('kanban')
   const [activeId, setActiveId] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [sortOrder, setSortOrder] = useState<'newest' | 'oldest'>('newest')
+  const [compact, setCompact] = useState(false)
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -147,7 +162,9 @@ export default function ApprovedClientAIPanel() {
           }
         }
       } catch (e: any) {
-        setError(e.message || 'Erro desconhecido')
+        console.log('Iniciando com colunas vazias - modo manual ativado')
+        // Não mostra erro, inicia com colunas vazias para criação manual
+        setAllAnalyses([])
       } finally {
         setLoading(false)
       }
@@ -155,36 +172,24 @@ export default function ApprovedClientAIPanel() {
     if (params?.id) loadData()
   }, [params?.id])
 
-  const columns = [
-    {
-      id: 'pending',
-      title: 'Pendente',
-      status: 'pending',
-      color: 'bg-yellow-50 dark:bg-yellow-950/20',
-      items: allAnalyses.filter(item => item.status === 'pending').sort((a, b) => (a.kanban_order || 0) - (b.kanban_order || 0))
-    },
-    {
-      id: 'analyzing',
-      title: 'Em Análise',
-      status: 'analyzing',
-      color: 'bg-blue-50 dark:bg-blue-950/20',
-      items: allAnalyses.filter(item => item.status === 'analyzing').sort((a, b) => (a.kanban_order || 0) - (b.kanban_order || 0))
-    },
-    {
-      id: 'approved',
-      title: 'Aprovado',
-      status: 'approved',
-      color: 'bg-emerald-50 dark:bg-emerald-950/20',
-      items: allAnalyses.filter(item => item.status === 'approved').sort((a, b) => (a.kanban_order || 0) - (b.kanban_order || 0))
-    },
-    {
-      id: 'rejected',
-      title: 'Rejeitado',
-      status: 'rejected',
-      color: 'bg-red-50 dark:bg-red-950/20',
-      items: allAnalyses.filter(item => item.status === 'rejected').sort((a, b) => (a.kanban_order || 0) - (b.kanban_order || 0))
-    }
-  ]
+  // Atualiza os itens de cada coluna baseado nos analyses
+  const updatedColumns = columns.map(col => ({
+    ...col,
+    items: allAnalyses.filter(item => item.status === col.status)
+      .sort((a, b) => (a.kanban_order || 0) - (b.kanban_order || 0))
+  }))
+
+  const viewColumns = updatedColumns.map(col => {
+    const q = searchQuery.trim().toLowerCase()
+    const items = col.items
+      .filter(i => !q || (i.company_name || '').toLowerCase().includes(q))
+      .sort((a, b) => {
+        const da = new Date(a.created_at).getTime()
+        const db = new Date(b.created_at).getTime()
+        return sortOrder === 'newest' ? db - da : da - db
+      })
+    return { ...col, items }
+  })
 
   const handleDragStart = (event: any) => {
     setActiveId(event.active.id)
@@ -324,6 +329,102 @@ export default function ApprovedClientAIPanel() {
     } catch (error) {
       console.error('Erro ao atualizar status:', error)
     }
+  }
+
+  const handleNotesUpdate = async (itemId: string, notes: any[]) => {
+    try {
+      await fetch(`/api/ai-analysis/${itemId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notes })
+      })
+      setAllAnalyses(prev => prev.map(item => 
+        item.id === itemId ? { ...item, notes } : item
+      ))
+    } catch (error) {
+      console.error('Erro ao atualizar anotações:', error)
+    }
+  }
+
+  const handleAddCard = async (cardData: {
+    company_name: string
+    status: string
+    analysis_type: 'pre_approval' | 'post_approval'
+    description?: string
+  }) => {
+    try {
+      // Validate company name
+      if (!cardData.company_name || cardData.company_name.trim() === '') {
+        setError('Nome da empresa é obrigatório')
+        return
+      }
+
+      // Debug: Log what's being sent
+      console.log('Sending to API:', {
+        ...cardData,
+        company_name: cardData.company_name.trim(),
+        related_client_id: params.id,
+        ai_data: {
+          description: cardData.description,
+          created_at: new Date().toISOString(),
+          strategy_generated: false
+        }
+      })
+
+      const response = await fetch('/api/ai-analysis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...cardData,
+          company_name: cardData.company_name.trim(), // Ensure it's trimmed
+          related_client_id: params.id,
+          ai_data: {
+            description: cardData.description,
+            created_at: new Date().toISOString(),
+            strategy_generated: false
+          }
+        })
+      })
+
+      const responseData = await response.json().catch(() => null)
+      if (response.ok) {
+        const newAnalysis = responseData
+        setAllAnalyses(prev => [...prev, newAnalysis])
+        setError('') // Clear any previous errors
+      } else {
+        const errorMessage = responseData?.details || responseData?.error || 'Falha ao criar card'
+        setError(errorMessage)
+        throw new Error(errorMessage)
+      }
+    } catch (error) {
+      console.error('Erro ao adicionar card:', error)
+      if (!error) {
+        setError('Erro ao criar novo card')
+      }
+    }
+  }
+
+  const handleAddColumn = (columnData: {
+    title: string
+    status: string
+    color: string
+  }) => {
+    const newColumn = {
+      id: columnData.status,
+      title: columnData.title,
+      status: columnData.status,
+      color: columnData.color,
+      items: []
+    }
+    setColumns(prev => [...prev, newColumn])
+  }
+
+  const handleColumnRename = (columnId: string, newTitle: string) => {
+    setColumns(prev => 
+      prev.map(col => 
+        col.id === columnId ? { ...col, title: newTitle } : col
+      )
+    )
   }
 
   if (loading) {
@@ -526,15 +627,28 @@ export default function ApprovedClientAIPanel() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-16 p-6 md:p-10 animate-in fade-in duration-700">
-      {/* Hero Section - Neo-brutalismo Suave */}
-      <div className="relative overflow-hidden rounded-[4rem] bg-white dark:bg-slate-900 border-[3px] border-slate-900 dark:border-slate-950 p-12 md:p-16 shadow-[16px_16px_0px_0px_rgba(0,0,0,1)] dark:shadow-[16px_16px_0px_0px_rgba(255,255,255,1)] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[12px_12px_0px_0px_rgba(0,0,0,1)] dark:hover:shadow-[12px_12px_0px_0px_rgba(255,255,255,1)] group">
+      {/* Hero + KPIs lado a lado */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+        {/* Hero Section - Neo-brutalismo Suave */}
+        <div className="relative overflow-hidden rounded-[4rem] bg-white dark:bg-slate-900 border-[3px] border-slate-900 dark:border-slate-950 p-10 md:p-12 shadow-[16px_16px_0px_0px_rgba(0,0,0,1)] dark:shadow-[16px_16px_0px_0px_rgba(255,255,255,1)] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[12px_12px_0px_0px_rgba(0,0,0,1)] dark:hover:shadow-[12px_12px_0px_0px_rgba(255,255,255,1)] group">
         <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-primary/5 rounded-full -mr-64 -mt-64 transition-transform group-hover:scale-110 duration-1000" />
+        <div className="absolute top-6 left-6 z-20">
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={() => router.back()} 
+            className="rounded-xl border-[3px] border-slate-900 dark:border-slate-950 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-black uppercase tracking-widest text-[10px] h-10 px-4 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_0px_rgba(255,255,255,1)] hover:bg-slate-50 dark:hover:bg-slate-800 transition-all"
+          >
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Voltar
+          </Button>
+        </div>
         
         <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-16">
           <div className="space-y-10">
-            <div className="flex flex-col sm:flex-row sm:items-center gap-8">
-              <div className="p-8 rounded-[2.5rem] bg-slate-900 dark:bg-slate-950 text-white border-2 border-black dark:border-slate-950 shadow-[8px_8px_0px_0px_rgba(59,130,246,0.5)] dark:shadow-[8px_8px_0px_0px_rgba(255,255,255,1)] animate-pulse-slow">
-                <Brain className="h-16 w-16" />
+            <div className="flex flex-col sm:flex-row sm:items-center gap-6">
+              <div className="p-6 rounded-[2rem] bg-slate-900 dark:bg-slate-950 text-white border-2 border-black dark:border-slate-950 shadow-[8px_8px_0px_0px_rgba(59,130,246,0.5)] dark:shadow-[8px_8px_0px_0px_rgba(255,255,255,1)] animate-pulse-slow">
+                <Brain className="h-12 w-12" />
               </div>
               <div className="space-y-4">
                 <div className="flex flex-wrap items-center gap-4">
@@ -545,13 +659,13 @@ export default function ApprovedClientAIPanel() {
                     ID: {analysis.id.slice(0, 8)}
                   </span>
                 </div>
-                <h1 className="text-6xl md:text-8xl font-black tracking-tighter leading-none text-slate-900 dark:text-white italic uppercase">
+                <h1 className="text-3xl md:text-5xl font-black tracking-tighter leading-none text-slate-900 dark:text-white italic uppercase">
                   {analysis.company_name}
                 </h1>
               </div>
             </div>
             
-            <p className="text-2xl md:text-3xl text-slate-500 dark:text-slate-400 font-bold max-w-4xl leading-relaxed">
+            <p className="text-sm md:text-lg text-slate-500 dark:text-slate-400 font-bold max-w-4xl leading-relaxed">
               Análise detalhada e estratégica gerada pela <span className="text-slate-900 dark:text-white underline decoration-primary decoration-[8px] underline-offset-[12px] italic">IA Digitall Evolution</span>. 
               Insights baseados em dados reais de mercado para sua abordagem comercial.
             </p>
@@ -559,59 +673,51 @@ export default function ApprovedClientAIPanel() {
 
           <div className="flex flex-col sm:flex-row gap-6">
             <Button 
-              variant="outline" 
               size="lg" 
-              onClick={() => router.back()} 
-              className="rounded-3xl border-[3px] border-slate-900 dark:border-slate-950 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-black uppercase tracking-widest text-xs h-20 px-12 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] dark:shadow-[8px_8px_0px_0px_rgba(255,255,255,1)] hover:bg-slate-50 dark:hover:bg-slate-800 transition-all active:shadow-none active:translate-x-[2px] active:translate-y-[2px]"
-            >
-              <ArrowLeft className="h-6 w-6 mr-4" />
-              Painel CRM
-            </Button>
-            <Button 
-              size="lg" 
-              className="rounded-3xl bg-primary text-primary-foreground font-black uppercase tracking-widest text-xs h-20 px-14 border-[3px] border-slate-900 dark:border-slate-950 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] dark:shadow-[8px_8px_0px_0px_rgba(255,255,255,1)] hover:scale-[1.02] active:scale-95 transition-all"
+              className="rounded-3xl bg-primary text-primary-foreground font-black uppercase tracking-widest text-xs h-16 px-12 border-[3px] border-slate-900 dark:border-slate-950 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] dark:shadow-[8px_8px_0px_0px_rgba(255,255,255,1)] hover:scale-[1.02] active:scale-95 transition-all"
             >
               <Zap className="h-6 w-6 mr-4 fill-current" />
               NOVA ANÁLISE
             </Button>
           </div>
         </div>
-      </div>
+        </div>
 
-      {/* KPI Overview Cards - Neo-brutalismo Suave */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-10">
-        {[
-          { label: 'Match Score', value: '85', unit: '%', icon: Target, color: 'bg-blue-600', trend: 'Potencial de Conversão Alto', progress: 85 },
-          { label: 'Presence', value: '7.2', unit: '/10', icon: Globe, color: 'bg-indigo-600', trend: 'Presença Digital Forte', progress: 72 },
-          { label: 'Market Fit', value: analysis.ai_data?.industry || 'Tecnologia', unit: '', icon: BarChart3, color: 'bg-purple-600', trend: 'Segmento Premium', progress: 100 },
-          { label: 'Status IA', value: 'Ativo', unit: '', icon: Shield, color: 'bg-slate-900', trend: 'Redes Neurais Online', progress: 100 }
-        ].map((kpi, i) => (
-          <Card key={i} className="border-[3px] border-slate-900 dark:border-slate-950 rounded-[3rem] bg-white dark:bg-slate-900 shadow-[12px_12px_0px_0px_rgba(0,0,0,1)] dark:shadow-[12px_12px_0px_0px_rgba(255,255,255,1)] overflow-hidden hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] dark:hover:shadow-[8px_8px_0px_0px_rgba(255,255,255,1)] transition-all group">
-            <CardContent className="p-10">
-              <div className="flex justify-between items-start mb-8">
-                <p className="text-[11px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em] italic">{kpi.label}</p>
-                <div className={`p-5 rounded-2xl ${kpi.color} text-white border-2 border-black dark:border-slate-950 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)] group-hover:rotate-3 transition-transform`}>
-                  <kpi.icon className="h-6 w-6" />
-                </div>
-              </div>
-              <div className="space-y-6">
-                <div className="flex items-baseline gap-2">
-                  <span className="text-6xl font-black tracking-tighter text-slate-900 dark:text-white">{kpi.value}</span>
-                  <span className="text-2xl font-black text-slate-400 dark:text-slate-500 italic">{kpi.unit}</span>
-                </div>
-                {kpi.label !== 'Market Fit' && kpi.label !== 'Status IA' ? (
-                  <div className="h-4 w-full bg-slate-100 dark:bg-slate-800 rounded-full border-[3px] border-slate-900 dark:border-slate-950 overflow-hidden">
-                    <div className={`h-full ${kpi.color} rounded-full`} style={{ width: `${kpi.progress}%` }} />
+        {/* KPI Overview Cards - Neo-brutalismo Suave */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+          {[
+            { label: 'Match Score', value: '85', unit: '%', icon: Target, color: 'bg-blue-600', trend: 'Potencial de Conversão Alto', progress: 85 },
+            { label: 'Presence', value: '7.2', unit: '/10', icon: Globe, color: 'bg-indigo-600', trend: 'Presença Digital Forte', progress: 72 },
+            { label: 'Market Fit', value: analysis.ai_data?.industry || 'Tecnologia', unit: '', icon: BarChart3, color: 'bg-purple-600', trend: 'Segmento Premium', progress: 100 },
+            { label: 'Status IA', value: 'Ativo', unit: '', icon: Shield, color: 'bg-slate-900', trend: 'Redes Neurais Online', progress: 100 }
+          ].map((kpi, i) => (
+            <Card key={i} className="border-[3px] border-slate-900 dark:border-slate-950 rounded-[3rem] bg-white dark:bg-slate-900 shadow-[12px_12px_0px_0px_rgba(0,0,0,1)] dark:shadow-[12px_12px_0px_0px_rgba(255,255,255,1)] overflow-hidden hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] dark:hover:shadow-[8px_8px_0px_0px_rgba(255,255,255,1)] transition-all group">
+              <CardContent className="p-6">
+                <div className="flex justify-between items-start mb-5">
+                  <p className="text-[11px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em] italic">{kpi.label}</p>
+                  <div className={`p-3 rounded-2xl ${kpi.color} text-white border-2 border-black dark:border-slate-950 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)]`}>
+                    <kpi.icon className="h-6 w-6" />
                   </div>
-                ) : null}
-                <div className="flex items-center gap-3 text-[11px] font-black text-slate-900 dark:text-slate-100 uppercase tracking-widest italic">
-                  <TrendingUp className="h-4 w-4 text-emerald-500" />
-                  {kpi.trend}
                 </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+                <div className="space-y-4">
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-4xl font-black tracking-tighter text-slate-900 dark:text-white">{kpi.value}</span>
+                    <span className="text-lg font-black text-slate-400 dark:text-slate-500 italic">{kpi.unit}</span>
+                  </div>
+                  {kpi.label !== 'Market Fit' && kpi.label !== 'Status IA' ? (
+                    <div className="h-2 w-full bg-slate-100 dark:bg-slate-800 rounded-full border-[3px] border-slate-900 dark:border-slate-950 overflow-hidden">
+                      <div className={`h-full ${kpi.color} rounded-full`} style={{ width: `${kpi.progress}%` }} />
+                    </div>
+                  ) : null}
+                  <div className="flex items-center gap-3 text-[11px] font-black text-slate-900 dark:text-slate-100 uppercase tracking-widest italic">
+                    <TrendingUp className="h-4 w-4 text-emerald-500" />
+                    {kpi.trend}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
       </div>
 
       {/* Tabs & Content - Neo-brutalismo Suave */}
@@ -637,6 +743,30 @@ export default function ApprovedClientAIPanel() {
         </div>
 
         <TabsContent value="kanban" className="mt-0 animate-in slide-in-from-top-10 duration-700">
+          <div className="mb-6 flex items-center gap-3 flex-wrap">
+            <Input 
+              placeholder="Buscar por nome da empresa..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full sm:w-80 border-[3px] border-slate-900 dark:border-slate-950 rounded-2xl"
+            />
+            <select
+              value={sortOrder}
+              onChange={(e) => setSortOrder(e.target.value as 'newest' | 'oldest')}
+              className="h-10 px-3 rounded-2xl border-[3px] border-slate-900 dark:border-slate-950 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-black uppercase text-[10px] tracking-widest"
+              title="Ordenar"
+            >
+              <option value="newest">Mais recentes</option>
+              <option value="oldest">Mais antigos</option>
+            </select>
+            <button
+              onClick={() => setCompact(v => !v)}
+              className="h-10 px-3 rounded-2xl border-[3px] border-slate-900 dark:border-slate-950 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-black uppercase text-[10px] tracking-widest"
+              title="Modo compacto"
+            >
+              {compact ? 'Modo normal' : 'Modo compacto'}
+            </button>
+          </div>
           <DndContext
             sensors={sensors}
             collisionDetection={closestCorners}
@@ -644,9 +774,9 @@ export default function ApprovedClientAIPanel() {
             onDragOver={handleDragOver}
             onDragEnd={handleDragEnd}
           >
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-              {columns.map((column) => (
-                <div key={column.id} className="space-y-6">
+            <div className="flex gap-8 overflow-x-auto pb-4">
+              {viewColumns.map((column) => (
+                <div key={column.id} className="min-w-[350px] space-y-6">
                   <div className="flex items-center justify-between px-4">
                     <h3 className="text-xl font-black uppercase tracking-tighter italic text-slate-900 dark:text-white flex items-center gap-3">
                       <span className={`w-3 h-3 rounded-full ${column.status === 'pending' ? 'bg-yellow-400' : column.status === 'analyzing' ? 'bg-blue-400' : column.status === 'approved' ? 'bg-emerald-400' : 'bg-red-400'}`} />
@@ -663,9 +793,19 @@ export default function ApprovedClientAIPanel() {
                       setAnalysis(item)
                       setActiveTab('overview')
                     }}
+                    onNotesUpdate={handleNotesUpdate}
+                    onAddCard={handleAddCard}
+                    onColumnRename={handleColumnRename}
+                    isFirstColumn={column.id === 'pending'}
+                    compact={compact}
                   />
                 </div>
               ))}
+              
+              {/* Botão para adicionar novas colunas */}
+              <div className="min-w-[350px] flex items-center justify-center">
+                <AddColumnButton onAddColumn={handleAddColumn} />
+              </div>
             </div>
 
             <DragOverlay dropAnimation={{

@@ -1,17 +1,19 @@
 'use client'
 
+import { useState } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { MoreVertical, ExternalLink } from 'lucide-react'
+import { MoreVertical, ExternalLink, MessageSquare, Calendar, Paperclip, Tag } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { CardNotes } from './card-notes'
 
 interface AIData {
   id: string
@@ -28,9 +30,10 @@ interface AIData {
 interface KanbanCardProps {
   item: AIData
   onItemClick: (item: AIData) => void
+  onNotesUpdate: (itemId: string, notes: any[]) => void
 }
 
-export function KanbanCard({ item, onItemClick }: KanbanCardProps) {
+export function KanbanCard({ item, onItemClick, onNotesUpdate }: KanbanCardProps) {
   const {
     attributes,
     listeners,
@@ -115,6 +118,48 @@ export function KanbanCard({ item, onItemClick }: KanbanCardProps) {
                 <p className="line-clamp-2 italic">{item.user_notes}</p>
               </div>
             )}
+
+            {/* Ações rápidas */}
+            <div className="flex items-center gap-1 flex-wrap">
+              <CardNotes
+                itemId={item.id}
+                notes={item.notes || []}
+                onNotesUpdate={onNotesUpdate}
+              />
+              
+              {item.ai_data?.due_date && (
+                <Badge variant="outline" className="text-[9px] font-black uppercase tracking-wider px-2 py-0.5 border-2 border-slate-900 dark:border-slate-950 bg-amber-50 dark:bg-amber-950/20 text-amber-700 dark:text-amber-400">
+                  <Calendar className="h-3 w-3 mr-1" />
+                  {new Date(item.ai_data.due_date).toLocaleDateString('pt-BR')}
+                </Badge>
+              )}
+
+              {item.ai_data?.labels && item.ai_data.labels.length > 0 && (
+                <div className="flex gap-1">
+                  {item.ai_data.labels.slice(0, 2).map((label: string, index: number) => (
+                    <Badge
+                      key={index}
+                      variant="outline"
+                      className="text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 border-2 border-slate-900 dark:border-slate-950"
+                      style={{ 
+                        backgroundColor: label.includes('urgent') ? '#fef3c7' : 
+                                      label.includes('important') ? '#dbeafe' : 
+                                      label.includes('followup') ? '#dcfce7' : 
+                                      '#f3f4f6'
+                      }}
+                    >
+                      <Tag className="h-2.5 w-2.5 mr-0.5" />
+                      {label}
+                    </Badge>
+                  ))}
+                  {item.ai_data.labels.length > 2 && (
+                    <Badge variant="outline" className="text-[8px] font-black px-1.5 py-0.5 border-2 border-slate-900 dark:border-slate-950">
+                      +{item.ai_data.labels.length - 2}
+                    </Badge>
+                  )}
+                </div>
+              )}
+            </div>
 
             {item.ai_data?.strategy_generated && (
               <div className="text-[9px] font-black uppercase tracking-widest text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/20 px-3 py-1.5 rounded-lg border-2 border-emerald-200 dark:border-emerald-800 flex items-center gap-2">

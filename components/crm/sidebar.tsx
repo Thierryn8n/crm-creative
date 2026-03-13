@@ -83,7 +83,7 @@ export function CRMSidebar() {
   
         <aside
           className={cn(
-            'fixed lg:sticky lg:top-0 lg:h-screen inset-y-0 left-0 z-40 bg-white dark:bg-slate-950 border-r-[3px] border-slate-900 transition-all duration-300 ease-in-out',
+            'fixed top-0 left-0 h-screen z-40 bg-white dark:bg-slate-950 border-r-[3px] border-slate-900 transition-all duration-300 ease-in-out',
             collapsed ? 'w-20' : 'w-64',
             openMobile ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
           )}

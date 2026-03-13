@@ -96,13 +96,23 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
+    console.log('API received body:', JSON.stringify(body, null, 2))
+    
     const { 
       company_name, 
-      analysis_type, 
+      status,
       ai_data, 
-      user_notes, 
-      negotiation_details 
+      related_client_id
     } = body
+
+     // Validate company_name
+     if (!company_name || typeof company_name !== 'string' || company_name.trim() === '') {
+       console.log('Invalid company_name:', company_name)
+       return NextResponse.json({ 
+         error: 'Nome da empresa é obrigatório',
+         details: 'O campo company_name não pode estar vazio'
+       }, { status: 400 })
+     }
 
     // Buscar o profile_id real do usuário logado
     const { data: profile } = await supabase
@@ -117,37 +127,114 @@ export async function POST(request: NextRequest) {
 
     const profileId = profile.id
 
-    // Criar nova análise
-    const { data: newAnalysis, error } = await supabase
-      .from('company_analysis')
-      .insert([{
-        company_name,
-        profile_id: profileId,
-        website_analysis: ai_data?.website_analysis,
-        social_media_analysis: ai_data?.social_media,
-        linkedin_data: ai_data?.linkedin_data,
-        trends_analysis: ai_data?.trends_analysis,
-        ads_analysis: ai_data?.ads_analysis,
-        strategy_generated: ai_data?.strategy_generated,
-        notes: user_notes,
-        negotiation_summary: negotiation_details,
-        status: 'pending'
-      }])
-      .select()
-      .single()
+    let safeRelatedClientId: string | null = null
+    if (related_client_id) {
+      const { data: realClient } = await supabase
+        .from('real_clients')
+        .select('id')
+        .eq('id', related_client_id)
+        .maybeSingle()
+
+      if (realClient?.id) {
+        safeRelatedClientId = realClient.id
+      } else {
+        const { data: client } = await supabase
+          .from('clients')
+          .select('id')
+          .eq('id', related_client_id)
+          .maybeSingle()
+
+        if (client?.id) {
+          safeRelatedClientId = client.id
+        }
+      }
+    }
+
+    const baseInsertData: any = {
+      company_name,
+      profile_id: profileId,
+      related_client_id: safeRelatedClientId,
+      analysis_status: status || 'pending'
+    }
+
+    const attemptInsert = async (payload: any) => {
+      return await supabase
+        .from('company_analysis')
+        .insert([payload])
+        .select()
+        .single()
+    }
+
+    let insertData: any = { ...baseInsertData }
+    let newAnalysis: any = null
+    let error: any = null
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const result = await attemptInsert(insertData)
+      newAnalysis = result.data
+      error = result.error
+
+      if (!error) {
+        break
+      }
+
+      if (error.code === '23505') {
+        const suffix = new Date().toISOString().replace('T', ' ').slice(0, 19)
+        insertData.company_name = `${company_name} (${suffix})`
+        continue
+      }
+
+      if (error.code === '42501') {
+        return NextResponse.json({ 
+          error: 'Sem permissão para criar análise',
+          details: error.message
+        }, { status: 403 })
+      }
+
+      const columnMatch = error.message?.match(/column \"(.+?)\" of relation \"company_analysis\" does not exist/)
+      if (columnMatch) {
+        const missingColumn = columnMatch[1]
+        if (missingColumn in insertData) {
+          delete insertData[missingColumn]
+        }
+        if (missingColumn === 'analysis_status' && !('status' in insertData)) {
+          insertData.status = status || 'pending'
+        }
+        continue
+      }
+
+      break
+    }
 
     if (error) {
       console.error('Erro ao criar análise:', error)
       return NextResponse.json({ 
         error: 'Erro ao criar análise',
-        details: error.message 
+        details: error.message
       }, { status: 500 })
     }
 
-    return NextResponse.json({ 
-      success: true, 
-      data: newAnalysis 
-    })
+    const transformed = {
+      id: newAnalysis.id,
+      company_name: newAnalysis.company_name || 'Empresa Sem Nome',
+      analysis_type: newAnalysis.strategy_generated ? 'post_approval' : 'pre_approval',
+      status: newAnalysis.analysis_status || newAnalysis.status || 'pending',
+      ai_data: {
+        website_analysis: newAnalysis.website_analysis,
+        social_media: newAnalysis.social_media_presence,
+        linkedin_data: newAnalysis.linkedin_analysis,
+        trends_analysis: newAnalysis.trends_analysis || newAnalysis.market_analysis,
+        ads_analysis: newAnalysis.ads_analysis,
+        strategy_generated: newAnalysis.strategy_generated || newAnalysis.ai_strategy
+      },
+      user_notes: newAnalysis.notes,
+      negotiation_details: newAnalysis.negotiation_summary,
+      kanban_order: newAnalysis.kanban_order || 0,
+      created_at: newAnalysis.created_at,
+      updated_at: newAnalysis.updated_at || newAnalysis.last_updated
+    }
+
+    return NextResponse.json(transformed)
     
   } catch (error) {
     console.error('Erro na API de criação de análise:', error)
